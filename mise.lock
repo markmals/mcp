@@ -31,12 +31,6 @@ url = "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_
 url_api = "https://api.github.com/repos/rhysd/actionlint/releases/assets/384924880"
 provenance = "github-attestations"
 
-[tools.actionlint."platforms.windows-x64"]
-checksum = "sha256:6e7241b51e6817ea6a047693d8e6fed13b31819c9a0dd6c5a726e1592d22f6e9"
-url = "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_windows_amd64.zip"
-url_api = "https://api.github.com/repos/rhysd/actionlint/releases/assets/384924919"
-provenance = "github-attestations"
-
 [[tools.dprint]]
 version = "0.64.3"
 backend = "aqua:dprint/dprint"
@@ -64,12 +58,6 @@ provenance = "github-attestations"
 checksum = "sha256:b868e1e87d2ed23217e5ea9521989c167ce8392090088bf0e1fb43be727ea752"
 url = "https://github.com/dprint/dprint/releases/download/0.64.3/dprint-x86_64-apple-darwin.zip"
 url_api = "https://api.github.com/repos/dprint/dprint/releases/assets/667629151"
-provenance = "github-attestations"
-
-[tools.dprint."platforms.windows-x64"]
-checksum = "sha256:3beb87a2582f1e43a301efd0840565518484e53f8c7b0ad27b857eee08e0745f"
-url = "https://github.com/dprint/dprint/releases/download/0.64.3/dprint-x86_64-pc-windows-msvc.zip"
-url_api = "https://api.github.com/repos/dprint/dprint/releases/assets/667629154"
 provenance = "github-attestations"
 
 [[tools.gh]]
@@ -101,12 +89,6 @@ url = "https://github.com/cli/cli/releases/download/v2.103.2/gh_2.103.2_macOS_am
 url_api = "https://api.github.com/repos/cli/cli/releases/assets/670305131"
 provenance = "github-attestations"
 
-[tools.gh."platforms.windows-x64"]
-checksum = "sha256:fef9fcdd8fdabd0501ab8b3d99eac976f504ab55d01bef9e8ef428a5d900ddda"
-url = "https://github.com/cli/cli/releases/download/v2.103.2/gh_2.103.2_windows_amd64.zip"
-url_api = "https://api.github.com/repos/cli/cli/releases/assets/670305204"
-provenance = "github-attestations"
-
 [[tools."github:dmno-dev/varlock"]]
 version = "1.25.0"
 backend = "github:dmno-dev/varlock"
@@ -136,12 +118,6 @@ checksum_source = "mise-versions"
 url = "https://github.com/dmno-dev/varlock/releases/download/varlock%401.25.0/varlock-macos-x64.tar.gz"
 url_api = "https://api.github.com/repos/dmno-dev/varlock/releases/assets/741963638"
 
-[tools."github:dmno-dev/varlock"."platforms.windows-x64"]
-checksum = "sha256:a53007f5840a2a2b30993688aed70f87f48e55775f9d9030c28b91cd27414759"
-checksum_source = "mise-versions"
-url = "https://github.com/dmno-dev/varlock/releases/download/varlock%401.25.0/varlock-win-x64.zip"
-url_api = "https://api.github.com/repos/dmno-dev/varlock/releases/assets/741963643"
-
 [[tools."github:gastownhall/beads"]]
 version = "1.3.2"
 backend = "github:gastownhall/beads"
@@ -169,12 +145,6 @@ provenance = "github-attestations"
 checksum = "sha256:255ac728729fdf431c3dd0d23ac03cce6d51998cc88a883ec8bc7be9323b0b05"
 url = "https://github.com/gastownhall/beads/releases/download/v1.3.2/beads_1.3.2_darwin_amd64.tar.gz"
 url_api = "https://api.github.com/repos/gastownhall/beads/releases/assets/670855683"
-provenance = "github-attestations"
-
-[tools."github:gastownhall/beads"."platforms.windows-x64"]
-checksum = "sha256:e59cb7742278185493e30c2eb97cb318db8d7a58c28ee5e88c2a30c7630c0975"
-url = "https://github.com/gastownhall/beads/releases/download/v1.3.2/beads_1.3.2_windows_amd64.zip"
-url_api = "https://api.github.com/repos/gastownhall/beads/releases/assets/670845961"
 provenance = "github-attestations"
 
 [[tools."github:knope-dev/knope"]]
@@ -209,17 +179,10 @@ checksum_source = "mise-versions"
 url = "https://github.com/knope-dev/knope/releases/download/knope/v0.24.0/knope-x86_64-apple-darwin.tgz"
 url_api = "https://api.github.com/repos/knope-dev/knope/releases/assets/742082788"
 
-[tools."github:knope-dev/knope"."platforms.windows-x64"]
-checksum = "sha256:3d95be772e1f54a0c5c20a32e51e6535f883262a55b8e3648fc16673e8e66520"
-checksum_source = "mise-versions"
-url = "https://github.com/knope-dev/knope/releases/download/knope/v0.24.0/knope-x86_64-pc-windows-msvc.tgz"
-url_api = "https://api.github.com/repos/knope-dev/knope/releases/assets/742082786"
-
 [[tools."github:markmals/workbench"]]
 version = "3.0.1"
 backend = "github:markmals/workbench"
 specifiers = ["3.0.1"]
-unsupported_platforms = ["windows-x64"]
 
 [tools."github:markmals/workbench"."platforms.linux-arm64"]
 checksum = "sha256:d1b67001665f88d73a5ac4d89e38c70fc1a274c6c85cc701701689db520d5d93"
@@ -269,12 +232,6 @@ url = "https://github.com/jdx/hk/releases/download/v2.8.1/hk-aarch64-apple-darwi
 signer = "sigstore-oidc:https://github.com/jdx/hk/.github/workflows/release.yml"
 repository_ids = { repository = "922514152" }
 
-[tools.hk."platforms.windows-x64"]
-checksum = "sha256:411cbe34d53764162dd36d69fe5bf7ec39ccd2a8166890c92c3531284355487d"
-url = "https://github.com/jdx/hk/releases/download/v2.8.1/hk-x86_64-pc-windows-msvc.zip"
-signer = "sigstore-oidc:https://github.com/jdx/hk/.github/workflows/release.yml"
-repository_ids = { repository = "922514152" }
-
 [[tools.rust]]
 version = "1.100.0"
 backend = "core:rust"
@@ -309,11 +266,5 @@ repository_ids = { repository = "1078528927" }
 [tools.worktrunk."platforms.macos-x64"]
 checksum = "sha256:211fa3585afa0ce243de0f007fbe2d8b86c5c88c85eda17d09311b32e8533714"
 url = "https://github.com/max-sixty/worktrunk/releases/download/v0.81.0/worktrunk-x86_64-apple-darwin.tar.xz"
-signer = "sigstore-oidc:https://github.com/max-sixty/worktrunk/.github/workflows/release.yaml"
-repository_ids = { repository = "1078528927" }
-
-[tools.worktrunk."platforms.windows-x64"]
-checksum = "sha256:389b595cb67482085419968939e329d61901cca9e959e4b6c288f01387b768b8"
-url = "https://github.com/max-sixty/worktrunk/releases/download/v0.81.0/worktrunk-x86_64-pc-windows-msvc.zip"
 signer = "sigstore-oidc:https://github.com/max-sixty/worktrunk/.github/workflows/release.yaml"
 repository_ids = { repository = "1078528927" }

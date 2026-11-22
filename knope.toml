@@ -5,7 +5,7 @@
 versioned_files = ["crates/mcp/Cargo.toml", "Cargo.lock"]
 changelog = "CHANGELOG.md"
 
-# The archives `mise run package -- <target>` builds; release.yml builds all five before
+# The archives `mise run package -- <target>` builds; release.yml builds all four before
 # `knope release` attaches them to the GitHub release. Their names carry the Rust target triple,
 # which Mise's `github:` backend matches to the installing machine.
 [[package.assets]]
@@ -19,9 +19,6 @@ path = "artifacts/mcp-aarch64-unknown-linux-musl.tar.gz"
 
 [[package.assets]]
 path = "artifacts/mcp-x86_64-unknown-linux-musl.tar.gz"
-
-[[package.assets]]
-path = "artifacts/mcp-x86_64-pc-windows-msvc.zip"
 
 [changes]
 ignore_conventional_commits = true
@@ -65,7 +62,7 @@ base = "main"
 template = "release: prepare $version"
 
 [workflows.steps.body]
-template = "Merging this pull request releases mcp $version: it builds the five archives, tags `v$version`, publishes the GitHub release with these notes, and updates the Homebrew formula when the tap token is configured.\n\n$changelog"
+template = "Merging this pull request releases mcp $version: it builds the four archives, tags `v$version`, publishes the GitHub release with these notes, and updates the Homebrew formula when the tap token is configured.\n\n$changelog"
 
 # `.github/workflows/release.yml` runs this (through `mise run release`) when the release pull
 # request merges, after it has built the archives into `artifacts/`.

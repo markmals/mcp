@@ -5,10 +5,10 @@ min_version = "2026.11.9"
 
 [settings]
 # Keep mise.lock current as tools change; `mise lock` regenerates it for exactly these platforms,
-# so a fresh `mise install` never rewrites it. Windows is listed because CI builds and tests
-# there (installing only Rust).
+# so a fresh `mise install` never rewrites it. They are the systems CI runs on and the archives
+# ship for: macOS and Linux.
 lockfile = true
-lockfile_platforms = ["macos-arm64", "macos-x64", "linux-x64", "linux-arm64", "windows-x64"]
+lockfile_platforms = ["macos-arm64", "macos-x64", "linux-x64", "linux-arm64"]
 
 [tools]
 "github:markmals/workbench" = "3.0.1"
@@ -108,7 +108,7 @@ run = "cargo doc --workspace --no-deps --locked"
 
 [tasks.dev]
 alias = "d"
-description = "Run the CLI from source: `mise run dev -- notes list --store /tmp/notes.sqlite3`"
+description = "Run the CLI from source: `mise run dev -- servers list`"
 run = "cargo run --quiet --package mcp --"
 
 [tasks."cli:reference"]

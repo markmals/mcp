@@ -34,10 +34,10 @@ fn every_entry_is_complete_and_uniquely_identified() {
             "{} belongs to no resource in RESOURCES",
             command.id
         );
-        let modifies = matches!(command.effect, Effect::Modifies(_));
+        let modifies = matches!(command.effect, Effect::Modifies(_) | Effect::Calls);
         assert_eq!(
             modifies, command.dry_run,
-            "{}: every modifying command, and only those, supports --dry-run",
+            "{}: every command that changes something, and only those, supports --dry-run",
             command.id
         );
         let declares_dry_run = command.arguments.iter().any(|argument| argument.name == "dry-run");
@@ -104,9 +104,11 @@ fn every_parser_command_and_argument_is_in_the_registry() {
 fn every_example_parses_as_its_own_command() {
     for command in registry::all() {
         for example in command.examples {
-            let mut args = vec![mcp::NAME];
-            args.extend_from_slice(example.args);
-            let result = parser::build().try_get_matches_from(&args);
+            let mut args = vec![std::ffi::OsString::from(mcp::NAME)];
+            args.extend(example.args.iter().map(std::ffi::OsString::from));
+            let result = parser::build().try_get_matches_from(parser::separate_trailing(&args));
+            let args: Vec<String> =
+                args.iter().map(|arg| arg.to_string_lossy().into_owned()).collect();
             assert!(result.is_ok(), "`{}` does not parse: {}", args.join(" "), result.unwrap_err());
             assert!(
                 example.args.starts_with(command.path),
@@ -134,6 +136,7 @@ fn minimal_args(command: &CommandSpec) -> Vec<String> {
             ArgumentKind::Positional => args.push(value),
             ArgumentKind::Option => args.extend([format!("--{}", argument.name), value]),
             ArgumentKind::Flag => args.push(format!("--{}", argument.name)),
+            ArgumentKind::Trailing => {}
         }
     }
     args
@@ -143,8 +146,11 @@ fn minimal_args(command: &CommandSpec) -> Vec<String> {
 fn every_declared_default_is_the_runtime_default() {
     for command in registry::all() {
         let args = minimal_args(command);
+        let separated = parser::separate_trailing(
+            &args.iter().map(std::ffi::OsString::from).collect::<Vec<_>>(),
+        );
         let matches = parser::build()
-            .try_get_matches_from(&args)
+            .try_get_matches_from(separated)
             .unwrap_or_else(|error| panic!("`{}` does not parse: {error}", args.join(" ")));
         let mut leaf = &matches;
         while let Some((_, sub)) = leaf.subcommand() {

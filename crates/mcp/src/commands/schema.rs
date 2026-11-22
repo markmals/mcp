@@ -18,7 +18,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec {
     path: &["schema"],
     summary: "Show a command's arguments, defaults, effects, errors, examples, and output schema",
     description: "With no command, lists every command with its summary and effect. With a command \
-        path such as `notes create` (or its identifier, `notes.create`), returns that command's \
+        path such as `tools info` (or its identifier, `tools.info`), returns that command's \
         full registry entry: each argument with its type, whether it is required, its default, and \
         its accepted values or bounds; whether it reads or modifies state and what it requires; \
         whether it supports --dry-run and is idempotent; the error codes it can return with their \
@@ -30,7 +30,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec {
         required: false,
         default: None,
         multiple: true,
-        summary: "The command path, such as `notes create`; omit to list every command",
+        summary: "The command path, such as `tools info`; omit to list every command",
     }],
     effect: Effect::Reads,
     requires: &[],
@@ -39,7 +39,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec {
     errors: &[ErrorCode::NotFound],
     examples: &[
         Example { summary: "List every command", args: &["schema"] },
-        Example { summary: "Inspect note creation", args: &["schema", "notes", "create"] },
+        Example { summary: "Inspect calling a tool", args: &["schema", "call"] },
     ],
     synonyms: &[
         "inspect",
@@ -117,9 +117,6 @@ fn render_description(description: &CommandDescription) -> String {
         if let Some(maximum) = argument.maximum {
             facts.push(format!("at most {maximum}"));
         }
-        if let Some(pattern) = &argument.pattern {
-            facts.push(format!("matches {pattern}"));
-        }
         text.push_str(&format!(
             "  {}  ({})\n      {}\n",
             argument.usage,
@@ -172,7 +169,7 @@ fn show_schema(invocation: &Invocation) -> Result<Response, Failure> {
     Ok(Response::new(&SchemaResult::Command(Box::new(command.describe()))))
 }
 
-/// `notes create`, `mcp notes create`, and `notes.create` all name the same command.
+/// `tools info`, `mcp tools info`, and `tools.info` all name the same command.
 fn command_path(words: &[String]) -> Vec<String> {
     let words = match words.first().map(String::as_str) {
         Some(first) if first == NAME => &words[1..],
@@ -204,13 +201,13 @@ mod tests {
     #[test]
     fn every_spelling_of_a_command_names_the_same_path() {
         for spelling in [
-            vec!["notes", "create"],
-            vec![NAME, "notes", "create"],
-            vec!["notes.create"],
-            vec!["notes create"],
+            vec!["tools", "info"],
+            vec![NAME, "tools", "info"],
+            vec!["tools.info"],
+            vec!["tools info"],
         ] {
             let words: Vec<String> = spelling.into_iter().map(str::to_string).collect();
-            assert_eq!(command_path(&words), ["notes", "create"]);
+            assert_eq!(command_path(&words), ["tools", "info"]);
         }
     }
 }

@@ -1,8 +1,8 @@
 # MCP CLI
 
-<!-- Replace this paragraph: what MCP CLI does, who runs it, and why an agent or a person would reach for it. -->
+`mcp` calls the tools of [Model Context Protocol](https://modelcontextprotocol.io) servers from the command line. It reads the servers a project declares in its `.mcp.json`, the file Claude Code, VS Code and other clients already read, and the servers you declare once in `$XDG_CONFIG_HOME/.mcp.json`, then lets any coding agent with a shell find, inspect and call their tools, pipe the results through `jq`, and script them, with no MCP support in its own harness and no tool catalogue loaded into its context.
 
-`mcp` is a command-line tool built for coding agents first and people second. Every operation is discoverable from the binary itself: search for a command, inspect its full contract, preview it with `--dry-run`, run it, and verify the effect. Results are JSON on stdout, errors are structured JSON on stderr with stable exit statuses, and nothing ever prompts.
+It is built for coding agents first and people second. Every operation is discoverable from the binary itself: search for a command, inspect its full contract, preview it with `--dry-run`, run it, and verify the effect. Results are JSON on stdout, errors are structured JSON on stderr with stable exit statuses, and nothing prompts on the agent's side; only `mcp servers approve` asks a person, through the system's own authentication dialog.
 
 ## Install
 
@@ -18,22 +18,42 @@ With [Homebrew](https://brew.sh):
 brew install markmals/tap/mcp
 ```
 
-Release archives for macOS (Apple silicon and Intel), Linux (arm64 and x64, static musl builds) and Windows (x64) are attached to every [GitHub release](https://github.com/markmals/mcp/releases), each with a build attestation: `gh attestation verify <archive> --repo markmals/mcp`.
+Release archives for macOS (Apple silicon and Intel) and Linux (arm64 and x64, static musl builds) are attached to every [GitHub release](https://github.com/markmals/mcp/releases), each with a build attestation: `gh attestation verify <archive> --repo markmals/mcp`. Windows is not supported: the session daemon uses Unix domain sockets.
 
 ## Use
 
 ```sh
-mcp --help                                   # orientation and the discovery commands
-mcp cli search "create a note"               # find the command for a task
-mcp schema notes create                      # its arguments, effects, errors, and result schema
-mcp context show                             # the store commands will use
-mcp notes create --name groceries --title Groceries --body "Milk, eggs" --dry-run
-mcp notes create --name groceries --title Groceries --body "Milk, eggs"
-mcp notes get groceries                      # verify
-mcp docs search "revision conflict"          # concepts, from documentation built into the binary
+mcp --help                                     # orientation and the discovery commands
+mcp cli search "call a tool"                   # find the command for a task
+mcp context show                               # the configuration files, workspace, and daemon in effect
+mcp servers list                               # the configured servers and whether each is usable
+mcp tools search "take a screenshot"           # tools across servers, each with the command to inspect it
+mcp tools info chrome-devtools navigate_page   # its description, schemas, and flags
+mcp call chrome-devtools navigate_page --url https://example.com
+mcp call --output text chrome-devtools take_snapshot | rg 'Example Domain'
+mcp docs search "approval"                     # concepts, from documentation built into the binary
 ```
 
-Notes live in one SQLite file: `--store <path>`, else `MCP_STORE`, else `$XDG_DATA_HOME/mcp/store.sqlite3` (`~/.local/share/mcp/store.sqlite3`; `%LOCALAPPDATA%\mcp\store.sqlite3` on Windows). The [CLI reference](crates/mcp/docs/cli.md) documents every command; it is generated from the command registry.
+A tool's input properties are flags after the tool's name (`filePath` is `--file-path`); `mcp`'s own options go before the server. `--input` takes the whole input as JSON, from a file (`@input.json`), or from stdin (`-`). Server processes live in a per-user session daemon, so a server starts once and keeps its state, such as a selected browser page, between commands.
+
+### Configuration
+
+```json
+{
+    "mcpServers": {
+        "chrome-devtools": { "command": "npx", "args": ["-y", "chrome-devtools-mcp@latest"] },
+        "figma": { "type": "http", "url": "http://127.0.0.1:3845/mcp" }
+    }
+}
+```
+
+Put personal servers in `$XDG_CONFIG_HOME/.mcp.json` (`~/.config/.mcp.json`); they apply in every directory. A project's nearest `.mcp.json`, searched from the working directory up to the git worktree root, adds its own servers and replaces a personal server of the same name. `mcp` supports `command`, `args`, `env`, `url`, `type` and `headers`, expands `${VAR}` and `${VAR:-default}`, and refuses any field it does not implement rather than ignoring it. Servers that need OAuth sign-in are not supported yet. [`docs/configuration.md`](crates/mcp/docs/configuration.md) is the full contract.
+
+### Approval
+
+A project's `.mcp.json` names programs to run. Set `MCP_REQUIRE_APPROVAL=1` to keep a project's servers from running until a person approves them with `mcp servers approve <name>`: Touch ID, Apple Watch or the login password on macOS, polkit on Linux. An approval is bound to the repository and to the server's configuration as written, so changing a command or an argument needs a new one. [`docs/approval.md`](crates/mcp/docs/approval.md) describes it, including the polkit action Linux needs.
+
+The [CLI reference](crates/mcp/docs/cli.md) documents every command; it is generated from the command registry.
 
 ## Develop
 
@@ -60,17 +80,20 @@ mise run check            # the gate CI runs: tests, rustdoc, formatting, Clippy
 ```text
 crates/mcp/
   src/registry.rs       the command contract every interface is generated from
-  src/commands/         each resource's commands: cli, schema, docs, context, notes, store
-  src/notes.rs          the notes domain: validation, change planning, queries
-  src/store.rs          store location, read-only opening, migrations
-  migrations/           the SQLite schema, embedded in the binary
+  src/commands/         each resource's commands: cli, schema, docs, context, servers, tools, call
+  src/config/           the configuration files: discovery, validation, interpolation, precedence
+  src/approval/         approvals: the state file and asking the person (LocalAuthentication, polkit)
+  src/daemon/           the session daemon and its client: sessions over stdio and Streamable HTTP
+  src/connect.rs        reaching a configured server: approval gate, interpolation, redaction
+  src/tool_flags.rs     a tool's input properties as command-line flags
   docs/                 Markdown built into the binary for `docs search`
+  examples/mcp-test-server/   the MCP server the tests run against; never shipped
   tests/cli/            tests that run the binary
 xtask/                  release helper: archives and the Homebrew formula
 ```
 
 ## Releasing
 
-Every pull request carries a Knope change file (`workbench change-files create`) or a `Release-Note: none` trailer. On `main`, the Prepare release workflow keeps a release pull request open; merging it runs the gate, builds, smoke-tests and attests the five archives, runs `knope release` to tag `v<version>` and publish the GitHub release with the archives, and then pushes the Homebrew formula to `markmals/homebrew-tap` when the repository variable `HOMEBREW_TAP` is `true` (otherwise that job is skipped).
+Every pull request carries a Knope change file (`workbench change-files create`) or a `Release-Note: none` trailer. On `main`, the Prepare release workflow keeps a release pull request open; merging it runs the gate, builds, smoke-tests and attests the four archives, runs `knope release` to tag `v<version>` and publish the GitHub release with the archives, and then pushes the Homebrew formula to `markmals/homebrew-tap` when the repository variable `HOMEBREW_TAP` is `true` (otherwise that job is skipped).
 
 Credentials: publishing the GitHub release uses the workflow's built-in `GITHUB_TOKEN`; no stored secret is needed. The Homebrew job alone uses the `homebrew` GitHub environment, which holds `HOMEBREW_TAP_TOKEN`: create that environment under Settings → Environments, restrict its deployment branches to `main`, add a fine-grained token with contents write access to `markmals/homebrew-tap` only as its `HOMEBREW_TAP_TOKEN` secret, then set the repository variable `HOMEBREW_TAP` to `true`.

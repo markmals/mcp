@@ -23,7 +23,7 @@ pub fn run(args: &[OsString], cwd: PathBuf) -> u8 {
         return printed(command.print_help());
     }
 
-    let matches = match command.try_get_matches_from_mut(args) {
+    let matches = match command.try_get_matches_from_mut(parser::separate_trailing(args)) {
         Ok(matches) => matches,
         Err(error) => match error.kind() {
             ErrorKind::DisplayHelp | ErrorKind::DisplayVersion => {
@@ -114,7 +114,7 @@ fn parse_failure(error: &clap::Error, args: &[OsString]) -> Failure {
             "arguments".into(),
             json!(spec.all_arguments().map(registry::ArgumentSpec::describe).collect::<Vec<_>>()),
         );
-        // `notes get --name groceries`: the flag names an argument that is positional here.
+        // `servers info --name demo`: the flag names an argument that is positional here.
         if let Some(ContextValue::String(flag)) = error.get(ContextKind::InvalidArg)
             && let Some(positional) = spec.arguments.iter().find(|argument| {
                 argument.kind == registry::ArgumentKind::Positional
@@ -180,8 +180,10 @@ fn report_to(
     match outcome {
         Ok(response) => {
             let rendered = match output {
-                OutputFormat::Json => json_text(&response.result, terminals.stdout),
-                OutputFormat::Text => response.text,
+                OutputFormat::Json if !response.usage => {
+                    json_text(&response.result, terminals.stdout)
+                }
+                _ => response.text,
             };
             let written = writeln!(stdout, "{}", rendered.trim_end_matches('\n'))
                 .and_then(|()| stdout.flush());
@@ -219,7 +221,7 @@ fn printed(result: std::io::Result<()>) -> u8 {
 }
 
 /// The failure for output stdout did not take. `None` for a closed stdout
-/// (`mcp notes list | head -c 0`): that is the reader's choice, not a failure.
+/// (`mcp servers list | head -c 0`): that is the reader's choice, not a failure.
 fn unwritable_stdout(error: std::io::Error) -> Option<Failure> {
     (error.kind() != std::io::ErrorKind::BrokenPipe).then(|| {
         Failure::internal(format!("cannot write to stdout: {error}"))
@@ -268,7 +270,8 @@ mod tests {
         let response = Response {
             result: json!({ "items": [] }),
             text: String::new(),
-            warnings: vec!["no store yet".into()],
+            warnings: vec!["no configuration file".into()],
+            usage: false,
         };
         let terminals = Terminals { stdout: false, stderr: false };
         let mut stderr = Vec::new();
@@ -277,7 +280,7 @@ mod tests {
             &mut stderr,
             terminals,
             OutputFormat::Json,
-            Some("notes.list"),
+            Some("servers.list"),
             Ok(response),
         );
         (status, String::from_utf8(stderr).unwrap())
@@ -300,6 +303,6 @@ mod tests {
         let mut stdout = Failing { kind: ErrorKind::BrokenPipe, on_flush_only: false };
         let (status, stderr) = report_success(&mut stdout);
         assert_eq!(status, 0);
-        assert_eq!(stderr, "warning: no store yet\n");
+        assert_eq!(stderr, "warning: no configuration file\n");
     }
 }

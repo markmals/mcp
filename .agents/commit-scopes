@@ -10,9 +10,13 @@
 
 # The command registry, discovery commands, and the output and error contract.
 cli
-# Notes, the example domain: its commands, validation, and receipts.
-notes
-# The SQLite store: location, migrations, and locking.
-store
+# Configuration files: discovery, validation, and interpolation.
+config
+# Approving project servers.
+approval
+# The session daemon and server connections.
+sessions
+# Finding, inspecting, and calling tools.
+tools
 # The release helper crate: archives and the Homebrew formula.
 xtask

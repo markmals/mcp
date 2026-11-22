@@ -13,8 +13,10 @@ pub trait RenderText {
 pub struct Response {
     pub result: Value,
     pub text: String,
-    /// Diagnostics for stderr, such as a store that does not exist yet.
+    /// Diagnostics for stderr.
     pub warnings: Vec<String>,
+    /// Usage text, printed as text whatever `--output` asks for, as `--help` is.
+    pub usage: bool,
 }
 
 impl Response {
@@ -27,7 +29,13 @@ impl Response {
             result: serde_json::to_value(result).expect("command results serialize to JSON"),
             text: result.render_text(),
             warnings: Vec::new(),
+            usage: false,
         }
+    }
+
+    /// Usage text for a person, like `--help`'s.
+    pub fn usage(text: String) -> Response {
+        Response { result: Value::String(text.clone()), text, warnings: Vec::new(), usage: true }
     }
 
     #[must_use]

@@ -22,23 +22,15 @@ jobs:
                 include:
                     - target: aarch64-apple-darwin
                       os: macos-latest
-                      archive: tar.gz
                       smoke: true
                     - target: x86_64-apple-darwin
                       os: macos-latest
-                      archive: tar.gz
                       smoke: false
                     - target: aarch64-unknown-linux-musl
                       os: ubuntu-24.04-arm
-                      archive: tar.gz
                       smoke: true
                     - target: x86_64-unknown-linux-musl
                       os: ubuntu-latest
-                      archive: tar.gz
-                      smoke: true
-                    - target: x86_64-pc-windows-msvc
-                      os: windows-latest
-                      archive: zip
                       smoke: true
         runs-on: ${{ matrix.os }}
         permissions:
@@ -46,7 +38,7 @@ jobs:
             id-token: write
             attestations: write
         env:
-            # Only Rust is installed below; Workbench has no Windows build.
+            # Only Rust is installed below; tasks must not install the rest of mise.toml.
             MISE_TASK_RUN_AUTO_INSTALL: "false"
             MISE_EXEC_AUTO_INSTALL: "false"
         steps:
@@ -66,35 +58,33 @@ jobs:
               run: sudo apt-get update && sudo apt-get install -y musl-tools
             - run: mise run package -- "${{ matrix.target }}"
               env:
-                  # The bundled SQLite is C; compile it with musl's compiler wrapper so it links
-                  # into the static musl binary.
+                  # C code in dependencies, such as the TLS crypto provider, compiles with musl's
+                  # compiler wrapper so it links into the static musl binary.
                   CC_aarch64_unknown_linux_musl: musl-gcc
                   CC_x86_64_unknown_linux_musl: musl-gcc
-            # The shipped executable, unpacked from its archive, against a new store: the static
-            # musl builds prove their bundled SQLite works, not just that they linked.
+            # The shipped executable, unpacked from its archive: it starts its session daemon over
+            # a Unix socket and reports a server it cannot start as unavailable, which proves the
+            # static musl builds work, not just that they linked.
             - name: Smoke-test the archive
               if: matrix.smoke
               shell: bash
               env:
                   TARGET: ${{ matrix.target }}
-                  ARCHIVE: ${{ matrix.archive }}
               run: |
-                  mkdir -p smoke
-                  if [ "$ARCHIVE" = zip ]; then
-                      # Git Bash's tar is GNU tar, which cannot read zip archives.
-                      pwsh -NoProfile -Command "Expand-Archive -LiteralPath artifacts/mcp-$TARGET.zip -DestinationPath smoke"
-                  else
-                      tar -xzf "artifacts/mcp-$TARGET.$ARCHIVE" -C smoke
-                  fi
-                  mcp="$(ls smoke/mcp-"$TARGET"/mcp*)"
+                  mkdir -p smoke/config
+                  mkdir -m 700 smoke/run
+                  tar -xzf "artifacts/mcp-$TARGET.tar.gz" -C smoke
+                  mcp="smoke/mcp-$TARGET/mcp"
                   "$mcp" --version
-                  "$mcp" notes create --name smoke --title Smoke --store smoke/store.sqlite3
-                  "$mcp" notes get smoke --store smoke/store.sqlite3
+                  echo '{"mcpServers":{"missing":{"command":"/nonexistent/mcp-server"}}}' > smoke/config/.mcp.json
+                  env XDG_CONFIG_HOME="$PWD/smoke/config" XDG_STATE_HOME="$PWD/smoke/state" XDG_RUNTIME_DIR="$PWD/smoke/run" "$mcp" tools list > smoke/tools.json
+                  jq -e '.complete == false and .unavailable[0].server == "missing"' smoke/tools.json
+                  env XDG_CONFIG_HOME="$PWD/smoke/config" XDG_STATE_HOME="$PWD/smoke/state" XDG_RUNTIME_DIR="$PWD/smoke/run" "$mcp" servers disconnect --all
             - uses: actions/attest-build-provenance@v4.2.2
               with:
-                  subject-path: artifacts/mcp-${{ matrix.target }}.${{ matrix.archive }}
+                  subject-path: artifacts/mcp-${{ matrix.target }}.tar.gz
             - uses: actions/upload-artifact@v7.0.2
               with:
                   name: mcp-${{ matrix.target }}
-                  path: artifacts/mcp-${{ matrix.target }}.${{ matrix.archive }}
+                  path: artifacts/mcp-${{ matrix.target }}.tar.gz
                   if-no-files-found: error
