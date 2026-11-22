@@ -1,0 +1,42 @@
+[package]
+name = "mcp"
+# Knope owns this version (knope.toml); change it only through a release.
+version = "0.0.0"
+edition.workspace = true
+publish.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Agent-first command-line tool that keeps notes in a local SQLite store"
+
+# The library holds the commands so tests can reach the registry and parser in-process; the
+# binary is a shell around `mcp::app::run`.
+[lib]
+name = "mcp"
+path = "src/lib.rs"
+
+[[bin]]
+name = "mcp"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.6", features = ["string"] }
+diesel = { version = "2.4", default-features = false, features = [
+    "sqlite",
+    "returning_clauses_for_sqlite_3_35",
+] }
+diesel_migrations = { version = "2.4", features = ["sqlite"] }
+jiff = { version = "1.0", default-features = false, features = ["std"] }
+# Compiles SQLite into the binary, so the CLI needs no system library on any target.
+libsqlite3-sys = { version = "0.40", features = ["bundled"] }
+schemars = "1.2"
+serde = { version = "1.0", features = ["derive"] }
+# `preserve_order` writes JSON fields in declaration order: `status` before the rest of a receipt,
+# and an error's `code` and `message` before its `details`.
+serde_json = { version = "1.0", features = ["preserve_order"] }
+
+[dev-dependencies]
+jsonschema = { version = "0.61", default-features = false }
+tempfile = "3.27"
+
+[lints]
+workspace = true

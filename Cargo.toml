@@ -1,0 +1,37 @@
+# The workspace: the shipped CLI in `crates/mcp`, and `xtask`, the release helper that never
+# ships. One lint policy, one dependency version per crate, one release profile.
+[workspace]
+resolver = "3"
+members = ["crates/mcp", "xtask"]
+# `cargo build` and `cargo run` without `-p` mean the CLI.
+default-members = ["crates/mcp"]
+
+[workspace.package]
+edition = "2024"
+publish = false
+repository = "https://github.com/markmals/mcp"
+rust-version = "1.100"
+
+[workspace.lints.rust]
+# A `pub` item that no public path reaches is either dead or a missing `pub(crate)`.
+unreachable_pub = "warn"
+
+[workspace.lints.clippy]
+# Every `unsafe` block states why it is sound.
+undocumented_unsafe_blocks = "warn"
+# Silencing a lint is a decision; decisions carry reasons. `#[expect]` fails once the code is
+# fixed, which is what makes the stated policy a check instead of a paragraph.
+allow_attributes_without_reason = "warn"
+allow_attributes = "warn"
+# Numeric casts that can silently lose data.
+cast_possible_truncation = "warn"
+cast_sign_loss = "warn"
+# A public fallible or panicking function documents when it does either.
+missing_errors_doc = "warn"
+missing_panics_doc = "warn"
+
+# Shipped binaries: `mise run package` builds this profile for the release archives.
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

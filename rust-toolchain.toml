@@ -1,0 +1,7 @@
+# rustup reads this; mise reads the `rust` pin in mise.toml. They pin the same toolchain for
+# different consumers (rust-analyzer and plain rustup read only this file), so change both
+# together.
+[toolchain]
+channel = "1.100.0"
+profile = "minimal"
+components = ["clippy", "rustfmt"]

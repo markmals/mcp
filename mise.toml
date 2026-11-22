@@ -1,0 +1,135 @@
+#:schema https://mise.jdx.dev/schema/mise.json
+# mise owns the task graph. Every other tool is invoked from a task here, so the local gate and
+# the CI gate cannot drift apart.
+min_version = "2026.11.9"
+
+[settings]
+# Keep mise.lock current as tools change; `mise lock` regenerates it for exactly these platforms,
+# so a fresh `mise install` never rewrites it. Windows is listed because CI builds and tests
+# there (installing only Rust).
+lockfile = true
+lockfile_platforms = ["macos-arm64", "macos-x64", "linux-x64", "linux-arm64", "windows-x64"]
+
+[tools]
+"github:markmals/workbench" = "3.0.1"
+# hk's version must match the `amends`/`import` URLs in hk.pkl — bump both together.
+hk = "2.8.1"
+gh = "2.103.2"
+# Beads is not in the mise registry; the GitHub release backend installs the same binary
+# `brew install beads` does. Pin it: an older `bd` refuses to open a newer database.
+"github:gastownhall/beads" = "1.3.2" # provides `bd`
+actionlint = "1.7.12"
+dprint = "0.64.3"
+worktrunk = "0.81.0" # provides `wt`
+"github:knope-dev/knope" = { version = "0.24.0", version_prefix = "knope/v" }
+"github:dmno-dev/varlock" = "1.25.0"
+# hk's `cargo_fmt` and `cargo_clippy` steps need both components on every machine, CI included.
+# rust-toolchain.toml pins the same toolchain for rustup; change both together.
+rust = { version = "1.100.0", components = "rustfmt,clippy" }
+
+[hooks]
+postinstall = 'ln -sfn "$(mise where github:markmals/workbench)" "{{config_root}}/.workbench"'
+
+# ── The task interface every Workbench project implements ────────────────────
+
+[tasks.setup]
+description = "Idempotent first-run bootstrap: crates, this machine's Beads replica, git hooks"
+run = [
+    # Downloads every crate Cargo.lock names, failing if the lockfile is out of date.
+    "cargo fetch --locked",
+    # A project that already has a Beads workspace restores this machine's replica from the
+    # remote's `refs/dolt/data`; only a project without one creates it. `--skip-hooks` is
+    # load-bearing: without it `bd init` points core.hooksPath at .beads/hooks, and every hook
+    # hk installs is then ignored by git.
+    "if [ -f .beads/config.yaml ]; then bd bootstrap --yes; else bd init --non-interactive --prefix mcp --skip-agents --skip-hooks; fi",
+    # Commit `.beads/issues.jsonl` so the work graph is reviewable in a diff.
+    "bd config set export.auto true",
+    # Syncs happen at the process's sync points (`mise run beads:sync`).
+    "bd config set dolt.auto-push false",
+    # hk owns every git hook (see hk.pkl). Never run `bd hooks install`.
+    "hk install --mise",
+]
+
+[tasks.check]
+description = "The single blocking gate: tests, rustdoc, formatting, Clippy, workflows, records"
+alias = "c"
+# `hk check --all` runs every step in hk.pkl: whitespace, newlines, merge conflicts, actionlint,
+# dprint, rustfmt, and Clippy over every target with warnings as errors.
+depends = ["test", "doc"]
+run = ["hk check --all", "mise run validate"]
+
+[tasks.fmt]
+alias = "f"
+description = "Format in place with hk's fixers (dprint, rustfmt); accepts file paths, all files when none"
+usage = 'arg "[files]" help="Files to format" var=#true'
+run = "hk fix ${usage_files:---all}"
+
+[tasks.status]
+description = "Where the work stands: current phase, next action, who acts, and Beads"
+run = "workbench workflow status --output text"
+
+[tasks.validate]
+description = "Check the project's records and its Workbench setup"
+run = ["workbench records validate --output text", "workbench project validate --output text"]
+
+[tasks."beads:sync"]
+description = "Sync this machine's Beads replica with the project's remote"
+run = "workbench beads sync --output text"
+
+[tasks."beads:claim"]
+description = "Claim a Beads item as this machine and confirm the claim survived a sync: `mise run beads:claim -- <id>`"
+run = "workbench beads claim --output text"
+
+[tasks."beads:close"]
+description = """Close a Beads item as this machine's claimant, then sync: `mise run beads:close -- <id> --reason "<reason>"`"""
+run = "workbench beads close --output text"
+
+# ── The CLI ──────────────────────────────────────────────────────────────────
+
+[tasks.build]
+alias = "b"
+description = "Build the CLI and the release helper"
+run = "cargo build --workspace --locked"
+
+[tasks.test]
+alias = "t"
+description = "Run the unit tests and the tests that run the binary"
+run = "cargo test --workspace --locked"
+
+[tasks.lint]
+alias = "l"
+description = "Clippy over every target, warnings are errors (hk runs the same check)"
+run = "cargo clippy --workspace --all-targets --locked -- -D warnings"
+
+[tasks.doc]
+description = "Build the rustdoc; any warning is an error"
+env = { RUSTDOCFLAGS = "-D warnings" }
+run = "cargo doc --workspace --no-deps --locked"
+
+[tasks.dev]
+alias = "d"
+description = "Run the CLI from source: `mise run dev -- notes list --store /tmp/notes.sqlite3`"
+run = "cargo run --quiet --package mcp --"
+
+[tasks."cli:reference"]
+description = "Regenerate crates/mcp/docs/cli.md from the command registry"
+env = { MCP_UPDATE_REFERENCE = "1" }
+run = "cargo test --package mcp --test cli reference"
+
+# ── Releases ─────────────────────────────────────────────────────────────────
+
+[tasks.package]
+description = "Build the release archive for one target into artifacts/ (default: this machine)"
+usage = 'arg "[target]" help="A Rust target triple, such as aarch64-apple-darwin"'
+run = "cargo xtask package {{usage.target}}"
+
+[tasks."release:formula"]
+description = "Write the Homebrew formula for the archives in artifacts/ to artifacts/mcp.rb"
+run = "cargo xtask formula"
+
+[tasks.release]
+description = "Publish the GitHub release with the archives in artifacts/ (release.yml runs this)"
+# `knope release` reads GITHUB_TOKEN; Varlock checks it against .env.schema and redacts it.
+# `--filter` loads that item alone, so another component's required items in a merged
+# .env.schema never block a release.
+run = "varlock run --filter GITHUB_TOKEN -- knope release --verbose"

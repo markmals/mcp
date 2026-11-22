@@ -1,0 +1,76 @@
+# Knope owns mcp's version, changelog, and releases. Change files in `.changeset/` are the only
+# source of version bumps: Scoped Commits subjects are not Conventional Commits.
+
+[package]
+versioned_files = ["crates/mcp/Cargo.toml", "Cargo.lock"]
+changelog = "CHANGELOG.md"
+
+# The archives `mise run package -- <target>` builds; release.yml builds all five before
+# `knope release` attaches them to the GitHub release. Their names carry the Rust target triple,
+# which Mise's `github:` backend matches to the installing machine.
+[[package.assets]]
+path = "artifacts/mcp-aarch64-apple-darwin.tar.gz"
+
+[[package.assets]]
+path = "artifacts/mcp-x86_64-apple-darwin.tar.gz"
+
+[[package.assets]]
+path = "artifacts/mcp-aarch64-unknown-linux-musl.tar.gz"
+
+[[package.assets]]
+path = "artifacts/mcp-x86_64-unknown-linux-musl.tar.gz"
+
+[[package.assets]]
+path = "artifacts/mcp-x86_64-pc-windows-msvc.zip"
+
+[changes]
+ignore_conventional_commits = true
+
+[release_notes]
+change_templates = [
+    "### $summary\n\n$details",
+    "* $summary by @$pr_author_login in #$pr_number",
+    "* $summary",
+]
+
+[github]
+owner = "markmals"
+repo = "mcp"
+
+# `.github/workflows/prepare-release.yml` runs this on every push to `main`: it keeps one release
+# pull request open from the `release` branch, showing the next version and its changelog entry.
+[[workflows]]
+name = "prepare-release"
+
+[[workflows.steps]]
+type = "Command"
+command = "git switch -c release"
+
+[[workflows.steps]]
+type = "PrepareRelease"
+
+[[workflows.steps]]
+type = "Command"
+command = "git commit -m \"release: prepare $version\""
+
+[[workflows.steps]]
+type = "Command"
+command = "git push --force --set-upstream origin release"
+
+[[workflows.steps]]
+type = "CreatePullRequest"
+base = "main"
+
+[workflows.steps.title]
+template = "release: prepare $version"
+
+[workflows.steps.body]
+template = "Merging this pull request releases mcp $version: it builds the five archives, tags `v$version`, publishes the GitHub release with these notes, and updates the Homebrew formula when the tap token is configured.\n\n$changelog"
+
+# `.github/workflows/release.yml` runs this (through `mise run release`) when the release pull
+# request merges, after it has built the archives into `artifacts/`.
+[[workflows]]
+name = "release"
+
+[[workflows.steps]]
+type = "Release"

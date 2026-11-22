@@ -1,0 +1,10 @@
+# 100 columns and 4-space indentation, like dprint's settings for the rest of the repository.
+max_width = 100
+tab_spaces = 4
+newline_style = "Unix"
+# Use the full width before wrapping.
+use_small_heuristics = "Max"
+# Stable rustfmt sorts imports within blank-line-separated groups but cannot create them, so
+# write std, then external crates, then `crate` imports as separate groups by hand.
+reorder_imports = true
+reorder_modules = true

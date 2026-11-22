@@ -1,0 +1,100 @@
+# Builds and attests one release archive per supported target: the `mcp` executable under a
+# top-level `mcp-<target>/` directory, named so Mise's `github:` backend picks the right one.
+# release.yml calls it; run it by hand (Actions → Build archives → Run workflow) to prove every
+# target still builds before a release.
+
+name: Build archives
+
+on:
+    workflow_call:
+    workflow_dispatch:
+
+permissions:
+    contents: read
+
+jobs:
+    build:
+        name: ${{ matrix.target }}
+        strategy:
+            fail-fast: true
+            matrix:
+                # `smoke`: the runner can execute the target, so the archive is unpacked and run.
+                include:
+                    - target: aarch64-apple-darwin
+                      os: macos-latest
+                      archive: tar.gz
+                      smoke: true
+                    - target: x86_64-apple-darwin
+                      os: macos-latest
+                      archive: tar.gz
+                      smoke: false
+                    - target: aarch64-unknown-linux-musl
+                      os: ubuntu-24.04-arm
+                      archive: tar.gz
+                      smoke: true
+                    - target: x86_64-unknown-linux-musl
+                      os: ubuntu-latest
+                      archive: tar.gz
+                      smoke: true
+                    - target: x86_64-pc-windows-msvc
+                      os: windows-latest
+                      archive: zip
+                      smoke: true
+        runs-on: ${{ matrix.os }}
+        permissions:
+            contents: read
+            id-token: write
+            attestations: write
+        env:
+            # Only Rust is installed below; Workbench has no Windows build.
+            MISE_TASK_RUN_AUTO_INSTALL: "false"
+            MISE_EXEC_AUTO_INSTALL: "false"
+        steps:
+            - uses: actions/checkout@v7
+              with:
+                  persist-credentials: false
+            - uses: jdx/mise-action@v5
+              with:
+                  # A release workflow must not restore a cache: a lower-trust workflow that can
+                  # write to the default branch could otherwise plant files in it.
+                  cache: false
+                  install_args: rust
+            - name: Install the target
+              run: mise exec -- rustup target add "${{ matrix.target }}"
+            - name: Install musl-tools
+              if: endsWith(matrix.target, '-linux-musl')
+              run: sudo apt-get update && sudo apt-get install -y musl-tools
+            - run: mise run package -- "${{ matrix.target }}"
+              env:
+                  # The bundled SQLite is C; compile it with musl's compiler wrapper so it links
+                  # into the static musl binary.
+                  CC_aarch64_unknown_linux_musl: musl-gcc
+                  CC_x86_64_unknown_linux_musl: musl-gcc
+            # The shipped executable, unpacked from its archive, against a new store: the static
+            # musl builds prove their bundled SQLite works, not just that they linked.
+            - name: Smoke-test the archive
+              if: matrix.smoke
+              shell: bash
+              env:
+                  TARGET: ${{ matrix.target }}
+                  ARCHIVE: ${{ matrix.archive }}
+              run: |
+                  mkdir -p smoke
+                  if [ "$ARCHIVE" = zip ]; then
+                      # Git Bash's tar is GNU tar, which cannot read zip archives.
+                      pwsh -NoProfile -Command "Expand-Archive -LiteralPath artifacts/mcp-$TARGET.zip -DestinationPath smoke"
+                  else
+                      tar -xzf "artifacts/mcp-$TARGET.$ARCHIVE" -C smoke
+                  fi
+                  mcp="$(ls smoke/mcp-"$TARGET"/mcp*)"
+                  "$mcp" --version
+                  "$mcp" notes create --name smoke --title Smoke --store smoke/store.sqlite3
+                  "$mcp" notes get smoke --store smoke/store.sqlite3
+            - uses: actions/attest-build-provenance@v4.2.2
+              with:
+                  subject-path: artifacts/mcp-${{ matrix.target }}.${{ matrix.archive }}
+            - uses: actions/upload-artifact@v7.0.2
+              with:
+                  name: mcp-${{ matrix.target }}
+                  path: artifacts/mcp-${{ matrix.target }}.${{ matrix.archive }}
+                  if-no-files-found: error

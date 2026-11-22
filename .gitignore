@@ -1,0 +1,43 @@
+# macOS
+.DS_Store
+Thumbs.db
+
+# Editor / IDE
+.vscode/
+.idea/
+
+# Cargo build output, and the release archives and formula `mise run package` and
+# `mise run release:formula` write. Cargo.lock is committed: it makes a release reproducible.
+/target/
+/artifacts/
+**/*.rs.bk
+
+# The Workbench package link: machine-local, recreated by `mise install`.
+.workbench
+
+# mise — machine-local overrides and their lockfiles. mise.toml and mise.lock are committed.
+mise.local.toml
+mise.*.local.toml
+.mise.local.toml
+.mise/locks/mise.local/
+
+# hk — machine-local hook overrides. hk.pkl is committed.
+hk.local.pkl
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
+.beads/proxieddb/
+*.gate.lock*
+
+# Environment: Varlock reads .env.schema (committed) and values from the process environment or
+# a gitignored .env.local.
+.env
+.env.*
+!.env.schema
+
+# Logs and temp
+*.log
+*.pid
+*.tmp

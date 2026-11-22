@@ -1,0 +1,62 @@
+name: CI
+
+on:
+    push:
+        branches: [main]
+    pull_request:
+
+permissions:
+    contents: read
+
+concurrency:
+    group: ci-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    # `mise run check` is the one definition of the blocking gate, and this job is the only place
+    # it runs automatically: no git hook runs it. Agents wait for this job to pass before marking
+    # a pull request ready or merging it. Only this workflow caches Cargo's registry and build
+    # output: release.yml publishes, so it restores none.
+    check:
+        name: Check
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+        steps:
+            - uses: actions/checkout@v7
+              with:
+                  fetch-depth: 0
+                  # Pull-request code runs here; it gets no token to push with.
+                  persist-credentials: false
+            - uses: jdx/mise-action@v5
+            # After mise-action: the cache key includes the Rust toolchain mise installed. A failed
+            # run still saves, so a lint failure does not discard a finished compile.
+            - uses: Swatinem/rust-cache@v2
+              with:
+                  cache-on-failure: true
+            - run: mise run check
+
+    # The gate runs on Linux. These jobs build and test the CLI on the other systems its archives
+    # ship for, including Windows with its `.exe` suffix, path separators, and line endings.
+    # Workbench ships no Windows build, so they install only Rust and run tasks without
+    # installing the rest of mise.toml.
+    build-and-test:
+        name: Build and test (${{ matrix.os }})
+        strategy:
+            fail-fast: false
+            matrix:
+                os: [macos-latest, windows-latest]
+        runs-on: ${{ matrix.os }}
+        permissions:
+            contents: read
+        env:
+            MISE_TASK_RUN_AUTO_INSTALL: "false"
+        steps:
+            - uses: actions/checkout@v7
+              with:
+                  persist-credentials: false
+            - uses: jdx/mise-action@v5
+              with:
+                  install_args: rust
+            - run: mise run build
+            - run: mise run test
