@@ -120,13 +120,8 @@ impl<'a> Connector<'a> {
         let prepared = self.prepare(server)?;
         let request = Request::Connect { target: prepared.target.clone() };
         match self.send(&request, &prepared.secrets)? {
-            ReplyBody::Connected { session, server: mut declaration } => {
-                declaration.stderr = declaration
-                    .stderr
-                    .iter()
-                    .map(|line| redact::text(line, &prepared.secrets))
-                    .collect();
-                Ok((session, declaration))
+            ReplyBody::Connected { session, server: declaration } => {
+                Ok((session, redact_declaration(declaration, &prepared.secrets)))
             }
             other => Err(unexpected(&other)),
         }
@@ -192,6 +187,17 @@ impl<'a> Connector<'a> {
     fn send(&self, request: &Request, secrets: &[String]) -> Result<ReplyBody, Failure> {
         client::send(&self.daemon, request, self.timeout() + REPLY_MARGIN)
             .map_err(|failure| redact::failure(failure, secrets))
+    }
+}
+
+/// What a server declared is server output, so configured secrets are redacted from all of it.
+fn redact_declaration(declaration: ServerDeclaration, secrets: &[String]) -> ServerDeclaration {
+    ServerDeclaration {
+        info: declaration.info.map(|info| redact::value(&info, secrets)),
+        protocol_version: declaration.protocol_version,
+        capabilities: redact::value(&declaration.capabilities, secrets),
+        instructions: declaration.instructions.map(|text| redact::text(&text, secrets)),
+        stderr: declaration.stderr.iter().map(|line| redact::text(line, secrets)).collect(),
     }
 }
 

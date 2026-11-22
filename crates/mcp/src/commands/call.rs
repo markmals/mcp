@@ -11,6 +11,7 @@ use crate::connect::Connector;
 use crate::daemon::protocol::SessionInfo;
 use crate::failure::{ErrorCode, Failure};
 use crate::invocation::Invocation;
+use crate::redact;
 use crate::registry::{
     ArgumentKind, ArgumentSpec, CommandSpec, DRY_RUN, Effect, Example, Requirement, TIMEOUT,
     ValueKind, shell_word,
@@ -152,19 +153,23 @@ fn content_text(result: &Value) -> String {
 }
 
 fn call(invocation: &Invocation) -> Result<Response, Failure> {
+    // Read --input before approvals are: waiting on stdin must not outlive a revocation.
+    let input = invocation.text("input")?;
     let connector = Connector::load(invocation)?;
     let server =
         connector.configuration.server(&invocation.string("server").unwrap_or_default())?;
+    let secrets = connector.prepare(server)?.secrets;
+    let local = |failure: Failure| redact::failure(failure, &secrets);
     let tool_name = invocation.string("tool").unwrap_or_default();
     let label = format!("{} {}", shell_word(&server.name), shell_word(&tool_name));
     let (session, tool) = connector.tool(server, &tool_name)?;
     let schema = tool.get("inputSchema").cloned().unwrap_or_else(|| json!({}));
-    let mut arguments = base_object(invocation.text("input")?.as_deref())?;
-    match parse(&schema, &invocation.strings("arguments"), &label)? {
+    let mut arguments = base_object(input.as_deref()).map_err(local)?;
+    match parse(&schema, &invocation.strings("arguments"), &label).map_err(local)? {
         FlagInput::Help => return Ok(Response::usage(usage(&server.name, &tool, &flags(&schema)))),
         FlagInput::Arguments(flagged) => arguments.extend(flagged),
     }
-    let input_validation = validate(&schema, &arguments, &label)?;
+    let input_validation = validate(&schema, &arguments, &label).map_err(local)?;
     if invocation.dry_run() {
         return Ok(Response::new(&CallResult {
             status: ReceiptStatus::DryRun,
@@ -181,7 +186,9 @@ fn call(invocation: &Invocation) -> Result<Response, Failure> {
             ],
         }));
     }
-    let (mut called, result) = connector.call(server, &tool_name, arguments)?;
+    let (mut called, result) = connector
+        .call(server, &tool_name, arguments)
+        .map_err(|failure| retry_advice(failure, &tool))?;
     // Looking the tool up may have started the session; "reused" is about earlier commands.
     called.reused = session.reused && called.id == session.id;
     let session = called;
@@ -209,6 +216,24 @@ fn tool_error(server: &str, tool: &str, result: Value) -> Failure {
     )
     .with_details(json!({ "server": server, "tool": tool, "result": result }))
     .suggest(format!("{NAME} tools info {} {}", shell_word(server), shell_word(tool)))
+}
+
+/// A timed-out call may have run: say whether the server claims retrying is safe.
+fn retry_advice(failure: Failure, tool: &Value) -> Failure {
+    if failure.code != ErrorCode::Timeout {
+        return failure;
+    }
+    let hint = |name: &str| tool["annotations"][name].as_bool() == Some(true);
+    let failure =
+        failure.suggest("The tool may have run: verify its effect before calling it again");
+    if hint("readOnlyHint") || hint("idempotentHint") {
+        failure.suggest(
+            "The tool declares readOnlyHint or idempotentHint, the server's own unverified \
+             hint that calling it again is safe; retry with a longer --timeout",
+        )
+    } else {
+        failure
+    }
 }
 
 /// The tool's usage, as `mcp call <server> <tool> --help` and `tools info --output text`

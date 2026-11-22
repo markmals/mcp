@@ -190,6 +190,7 @@ fn a_slow_tool_times_out_and_the_session_keeps_working() {
         .assert_failed(5, "TIMEOUT");
     assert!(started.elapsed() < Duration::from_secs(10), "took {:?}", started.elapsed());
     assert_eq!(error["retryable"], false);
+    assert!(error["suggestions"].to_string().contains("verify its effect"), "{error}");
     fixture.run(&["call", "demo", "counter"]).success();
 }
 

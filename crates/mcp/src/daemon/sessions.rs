@@ -25,8 +25,9 @@ pub(crate) struct Sessions {
 #[derive(Default)]
 struct Slot {
     /// Held while the slot's session is checked, started, replaced or ended, so concurrent
-    /// requests for one key start one server.
-    changing: tokio::sync::Mutex<()>,
+    /// requests for one key start one server. Shared so a sweep can hold it while a session
+    /// stops in the background.
+    changing: Arc<tokio::sync::Mutex<()>>,
     current: Mutex<Option<Arc<Session>>>,
 }
 
@@ -88,15 +89,17 @@ impl Sessions {
             .map(|((_, server), slot)| (server.clone(), Arc::clone(slot)))
             .collect();
         let mut stopping = JoinSet::new();
-        let mut ended = Vec::new();
         for (server, slot) in matching {
-            let _changing = slot.changing.lock().await;
-            if let Some(session) = slot.take() {
-                ended.push(server);
-                stopping.spawn(async move { session.stop().await });
-            }
+            // The slot stays locked until the old process is gone, so a request that arrives
+            // meanwhile waits rather than starting a second server for the same key.
+            stopping.spawn(async move {
+                let _changing = slot.changing.lock().await;
+                let session = slot.take()?;
+                session.stop().await;
+                Some(server)
+            });
         }
-        while stopping.join_next().await.is_some() {}
+        let mut ended: Vec<String> = stopping.join_all().await.into_iter().flatten().collect();
         ended.sort();
         ended
     }
@@ -106,12 +109,17 @@ impl Sessions {
     pub(crate) fn sweep(&self, idle_limit: Duration) {
         let now = Instant::now();
         for slot in self.slots() {
-            let Ok(_changing) = slot.changing.try_lock() else { continue };
-            let expired = slot
-                .current()
-                .is_some_and(|session| !session.is_alive() || session.idle_for(now) >= idle_limit);
-            if let Some(session) = expired.then(|| slot.take()).flatten() {
-                tokio::spawn(async move { session.stop().await });
+            let expired =
+                |session: &Session| !session.is_alive() || session.idle_for(now) >= idle_limit;
+            let Ok(changing) = Arc::clone(&slot.changing).try_lock_owned() else { continue };
+            if slot.current().is_some_and(|session| expired(&session)) {
+                let session = slot.take();
+                tokio::spawn(async move {
+                    let _changing = changing;
+                    if let Some(session) = session {
+                        session.stop().await;
+                    }
+                });
             }
         }
     }

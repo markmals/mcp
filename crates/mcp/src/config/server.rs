@@ -182,8 +182,9 @@ fn expand_map(
 }
 
 fn is_http_url(url: &str) -> bool {
-    ["http://", "https://"].iter().any(|scheme| {
-        url.strip_prefix(scheme).is_some_and(|rest| !rest.is_empty() && !rest.starts_with('/'))
+    reqwest::Url::parse(url).is_ok_and(|parsed| {
+        matches!(parsed.scheme(), "http" | "https")
+            && parsed.host_str().is_some_and(|host| !host.is_empty())
     })
 }
 
@@ -245,7 +246,9 @@ mod tests {
 
     #[test]
     fn a_url_must_be_absolute_http() {
-        for url in ["ftp://x", "localhost:3000/mcp", "http://", "${HOST}/mcp"] {
+        for url in
+            ["ftp://x", "localhost:3000/mcp", "http://", "${HOST}/mcp", "http://bad host/mcp"]
+        {
             let failure = server(json!({"url": url})).resolve(Path::new("/r"), &env).unwrap_err();
             assert_eq!(failure.details["field"], "url", "{url}");
         }

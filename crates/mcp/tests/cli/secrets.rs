@@ -26,10 +26,11 @@ fn secrets_stay_out_of_every_failure_and_inspection() {
         "header": { "url": server.url, "headers": { "Authorization": format!("Bearer {SENTINEL}") } },
         "query": { "url": "http://127.0.0.1:9/mcp?key=${SECRET}" },
         "missing": { "command": "/nonexistent/${SECRET}/server" },
+        "talkative": stdio_server(&["--instructions", "Use key ${SECRET}"]),
     }}));
     fixture.set_env("SECRET", Some(SENTINEL));
 
-    for server in ["interpolated", "literal", "header", "query", "missing"] {
+    for server in ["interpolated", "literal", "header", "query", "missing", "talkative"] {
         for args in [
             vec!["call", "--timeout", "10", server, "echo"],
             vec!["tools", "info", "--timeout", "10", server, "echo"],
@@ -46,4 +47,7 @@ fn secrets_stay_out_of_every_failure_and_inspection() {
     }
     let failed = fixture.run(&["call", "interpolated", "echo"]);
     assert!(failed.stderr.contains("<redacted>"), "{}", failed.stderr);
+    let flagged = fixture.run(&["call", "talkative", "echo", "--text", "ok", "--count", SENTINEL]);
+    assert_hidden(&flagged, "a malformed flag value");
+    assert_eq!(flagged.status, 2);
 }
