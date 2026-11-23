@@ -2,7 +2,7 @@
 id: proposal.0001
 title: Call Tools on Configured MCP Servers
 authors: [Mark Malstrom]
-status: active-review
+status: implemented
 pull-request: 2
 issues: ["https://github.com/markmals/pico/issues/60"]
 supersedes: []
