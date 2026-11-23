@@ -2,13 +2,13 @@
 # requires. This workflow runs the gate and builds, smoke-tests and attests the four archives;
 # only when all of that passes does `knope release` tag `v<version>` and publish the GitHub
 # release with the archives and the changelog entry. This CLI has no irreversible registry
-# publish, so the GitHub release is the last irreversible step. The Homebrew formula update
-# follows it because the formula points at the release's archives; it runs only when the
-# repository variable HOMEBREW_TAP is `true`, and can be re-run.
+# publish, so the GitHub release is the last irreversible step. The archives serve Mise's
+# `github:` backend. Homebrew does not use them: markmals/homebrew-tap builds and bottles the
+# formula from the `v<version>` tag, and moving that formula to a new tag is a pull request in
+# the tap after this workflow publishes (README, Releasing).
 #
 # Credentials: `knope release` uses the workflow's built-in GITHUB_TOKEN (contents: write on that
-# job only). HOMEBREW_TAP_TOKEN lives in the `homebrew` environment, restricted to `main`, and
-# only the `homebrew` job declares that environment.
+# job only).
 
 name: Release
 
@@ -84,52 +84,3 @@ jobs:
             - run: mise run release
               env:
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-    # Opt in with the repository variable HOMEBREW_TAP = `true` once the `homebrew` environment
-    # holds HOMEBREW_TAP_TOKEN (a token that can push to markmals/homebrew-tap only). Without the
-    # variable this job is skipped, not failed.
-    homebrew:
-        name: Update the Homebrew formula
-        needs: release
-        if: vars.HOMEBREW_TAP == 'true'
-        runs-on: ubuntu-latest
-        environment: homebrew
-        permissions:
-            contents: read
-        steps:
-            - uses: actions/checkout@v7
-              with:
-                  persist-credentials: false
-            - uses: actions/download-artifact@v8.0.2
-              with:
-                  path: artifacts
-                  pattern: mcp-*
-                  merge-multiple: true
-            - uses: jdx/mise-action@v5
-              with:
-                  cache: false
-                  install_args: rust
-            - name: Write the formula
-              run: mise run release:formula
-              env:
-                  MISE_TASK_RUN_AUTO_INSTALL: "false"
-            - uses: actions/checkout@v7
-              with:
-                  repository: markmals/homebrew-tap
-                  token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-                  path: homebrew-tap
-            - name: Push the formula
-              working-directory: homebrew-tap
-              run: |
-                  mkdir -p Formula
-                  cp ../artifacts/mcp.rb Formula/mcp.rb
-                  git add Formula/mcp.rb
-                  if git diff --cached --quiet; then
-                      echo "::notice::The formula is already current."
-                      exit 0
-                  fi
-                  version="$(sed -n 's/^  version "\(.*\)"$/\1/p' Formula/mcp.rb)"
-                  git config user.name "github-actions[bot]"
-                  git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-                  git commit -m "mcp ${version}"
-                  git push

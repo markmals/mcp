@@ -23,7 +23,7 @@ description: Use when writing, reviewing, or restructuring Rust in this reposito
 | Shipped documentation                  | `crates/mcp/docs/*.md`, listed in `docs::DOCUMENTS`                                 |
 | Rules about values                     | `#[cfg(test)] mod tests` beside the code                                            |
 | Rules about the process                | `crates/mcp/tests/cli/` (one test binary)                                           |
-| Release archives and Homebrew formula  | `xtask/` (`cargo xtask …`), never shipped                                           |
+| Release archives                       | `xtask/` (`cargo xtask …`), never shipped                                           |
 
 The binary is a shell around `mcp::app::run`; that is what lets the registry and parser be tested in-process.
 

@@ -123,10 +123,6 @@ description = "Build the release archive for one target into artifacts/ (default
 usage = 'arg "[target]" help="A Rust target triple, such as aarch64-apple-darwin"'
 run = "cargo xtask package {{usage.target}}"
 
-[tasks."release:formula"]
-description = "Write the Homebrew formula for the archives in artifacts/ to artifacts/mcp.rb"
-run = "cargo xtask formula"
-
 [tasks.release]
 description = "Publish the GitHub release with the archives in artifacts/ (release.yml runs this)"
 # `knope release` reads GITHUB_TOKEN; Varlock checks it against .env.schema and redacts it.

@@ -9,7 +9,7 @@ This file holds only what is true of this project. The process itself comes from
 `mcp` is an agent-first command-line client for Model Context Protocol servers, in Rust: an unfamiliar agent discovers, inspects, previews, runs and verifies every operation from the installed binary. It reads servers from a project's `.mcp.json` and the user's `$XDG_CONFIG_HOME/.mcp.json`, keeps their sessions in a per-user daemon, and calls their tools with the tools' input properties as flags.
 
 - `crates/mcp/`: the shipped CLI. `src/registry.rs` declares the command contract; `src/commands/` holds each resource's registry entries and implementations; `src/config/` (configuration files), `src/approval/` (approval and asking the person), `src/daemon/` (the session daemon and its client), `src/connect.rs` and `src/tool_flags.rs` are the domain; `docs/` is the Markdown compiled into the binary for `docs search` (`docs/cli.md` is generated); `examples/mcp-test-server/` is the MCP server the tests run against; `tests/cli/` runs the real binary.
-- `xtask/`: the unpublished release helper, `cargo xtask package` and `cargo xtask formula`.
+- `xtask/`: the unpublished release helper, `cargo xtask package`.
 - `.agents/skills/`: `designing-agent-first-clis` (the CLI contract) and `writing-rust` (this repository's Rust conventions). Read both before changing commands.
 
 ## Commands
@@ -18,7 +18,7 @@ This file holds only what is true of this project. The process itself comes from
 - `mise run cli:reference` regenerates `crates/mcp/docs/cli.md` after a registry change; the tests fail until it matches.
 - `mise run build`, `test`, `lint`, `doc`: Cargo over the workspace. `cargo test -p mcp` also builds the `mcp-test-server` example the process tests start.
 - `mise run package [-- <target>]` writes `artifacts/mcp-<target>.tar.gz`, this machine's target by default.
-- `mise run release:formula` writes the Homebrew formula for the archives in `artifacts/`.
+- After a release, the Homebrew formula moves to the new tag through a pull request in `markmals/homebrew-tap`, which builds and bottles it (README, Releasing).
 - `mise run release` publishes the GitHub release through Knope; only release.yml runs it.
 
 ## Platform rules and preview

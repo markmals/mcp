@@ -89,11 +89,13 @@ crates/mcp/
   docs/                 Markdown built into the binary for `docs search`
   examples/mcp-test-server/   the MCP server the tests run against; never shipped
   tests/cli/            tests that run the binary
-xtask/                  release helper: archives and the Homebrew formula
+xtask/                  release helper: per-target archives
 ```
 
 ## Releasing
 
-Every pull request carries a Knope change file (`workbench change-files create`) or a `Release-Note: none` trailer. On `main`, the Prepare release workflow keeps a release pull request open; merging it runs the gate, builds, smoke-tests and attests the four archives, runs `knope release` to tag `v<version>` and publish the GitHub release with the archives, and then pushes the Homebrew formula to `markmals/homebrew-tap` when the repository variable `HOMEBREW_TAP` is `true` (otherwise that job is skipped).
+Every pull request carries a Knope change file (`workbench change-files create`) or a `Release-Note: none` trailer. On `main`, the Prepare release workflow keeps a release pull request open. That needs Settings → Actions → General → "Allow GitHub Actions to create and approve pull requests". Merging the release pull request runs the gate, then builds, smoke-tests and attests the four archives. It then runs `knope release` to tag `v<version>` and publish the GitHub release with the archives, which Mise's `github:` backend installs. GitHub creates build attestations only for public repositories.
 
-Credentials: publishing the GitHub release uses the workflow's built-in `GITHUB_TOKEN`; no stored secret is needed. The Homebrew job alone uses the `homebrew` GitHub environment, which holds `HOMEBREW_TAP_TOKEN`: create that environment under Settings → Environments, restrict its deployment branches to `main`, add a fine-grained token with contents write access to `markmals/homebrew-tap` only as its `HOMEBREW_TAP_TOKEN` secret, then set the repository variable `HOMEBREW_TAP` to `true`.
+Homebrew builds `mcp` from source in [`markmals/homebrew-tap`](https://github.com/markmals/homebrew-tap) and serves bottles. After a release, open a pull request in the tap that moves `Formula/mcp.rb` to the new tag: its `url` and the `sha256` of `https://github.com/markmals/mcp/archive/refs/tags/v<version>.tar.gz`. The tap's `brew test-bot` workflow builds and tests bottles on that pull request. Once it passes, label the pull request `pr-pull`, and the tap's publish workflow uploads the bottles and lands the formula.
+
+Credentials: publishing the GitHub release uses the workflow's built-in `GITHUB_TOKEN`; no stored secret is needed.
