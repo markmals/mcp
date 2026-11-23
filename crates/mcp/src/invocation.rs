@@ -8,7 +8,6 @@ use serde_json::json;
 
 use crate::failure::Failure;
 use crate::registry::CommandSpec;
-use crate::store::StoreLocation;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OutputFormat {
@@ -44,8 +43,10 @@ impl<'a> Invocation<'a> {
             .unwrap_or_default()
     }
 
+    /// An integer argument; `None` when it is absent or the command does not declare it, as
+    /// `--timeout` on a command that never contacts a server.
     pub fn integer(&self, name: &str) -> Option<u64> {
-        self.matches.get_one::<u64>(name).copied()
+        self.matches.try_get_one::<u64>(name).ok().flatten().copied()
     }
 
     pub fn flag(&self, name: &str) -> bool {
@@ -86,13 +87,13 @@ impl<'a> Invocation<'a> {
         Ok(Some(value))
     }
 
-    /// The store this invocation targets: `--store`, else `MCP_STORE`, else the default.
-    ///
-    /// # Errors
-    ///
-    /// `INVALID_ARGUMENT` for an empty path, and `PRECONDITION_FAILED` when no default
-    /// location can be determined.
-    pub fn store_location(&self) -> Result<StoreLocation, Failure> {
-        StoreLocation::resolve(self.string("store"), &self.cwd, |key| std::env::var_os(key))
+    /// An environment variable of this invocation; a value that is not UTF-8 counts as unset.
+    pub fn env(&self, key: &str) -> Option<String> {
+        std::env::var(key).ok()
+    }
+
+    /// The whole environment of this invocation, which a stdio server it starts inherits.
+    pub fn environment(&self) -> std::collections::BTreeMap<String, String> {
+        std::env::vars().collect()
     }
 }

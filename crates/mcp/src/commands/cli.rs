@@ -37,10 +37,10 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec {
     idempotent: true,
     errors: &[ErrorCode::InvalidArgument],
     examples: &[
-        Example { summary: "Find how to add a note", args: &["cli", "search", "add a note"] },
+        Example { summary: "Find how to call a tool", args: &["cli", "search", "call a tool"] },
         Example {
-            summary: "Find how to change a note, three matches at most",
-            args: &["cli", "search", "edit the title of a note", "--limit", "3"],
+            summary: "Find how to approve a project's servers, three matches at most",
+            args: &["cli", "search", "trust the servers in this repository", "--limit", "3"],
         },
     ],
     synonyms: &["find", "discover", "lookup", "help", "commands", "which", "how"],
@@ -76,7 +76,7 @@ pub const SEARCH_CURSOR: ArgumentSpec = ArgumentSpec {
 pub struct CommandMatch {
     /// The exact command to run, without its arguments.
     pub command: String,
-    /// The registry identifier, such as `notes.create`.
+    /// The registry identifier, such as `tools.info`.
     pub id: String,
     pub summary: String,
     /// `reads`, or `modifies <what>`.
@@ -172,12 +172,14 @@ mod tests {
 
     #[test]
     fn ranks_the_intended_command_first() {
-        assert_eq!(top("create a new note"), "notes.create");
-        assert_eq!(top("remove a note"), "notes.delete");
-        assert_eq!(top("edit the title of a note"), "notes.update");
-        assert_eq!(top("show every note"), "notes.list");
-        assert_eq!(top("where is my data stored"), "context.show");
-        assert_eq!(top("upgrade the database schema"), "store.migrate");
+        assert_eq!(top("call a tool"), "call");
+        assert_eq!(top("run a tool with arguments"), "call");
+        assert_eq!(top("find a tool for taking a screenshot"), "tools.search");
+        assert_eq!(top("list configured servers"), "servers.list");
+        assert_eq!(top("trust the servers in this repository"), "servers.approve");
+        assert_eq!(top("which config file is used"), "context.show");
+        assert_eq!(top("restart a server"), "servers.disconnect");
+        assert_eq!(top("what arguments does a tool take"), "tools.info");
         assert_eq!(top("find a command"), "cli.search");
         assert_eq!(top("search the documentation"), "docs.search");
         assert_eq!(top("read a documentation file"), "docs.show");

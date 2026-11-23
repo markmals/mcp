@@ -1,35 +1,47 @@
 //! The structured error every failing command reports on stderr.
 
 use schemars::JsonSchema;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 /// A stable error code. Codes, exit statuses, and retryability are part of the CLI contract.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ErrorCode {
     /// Input is missing or malformed.
     InvalidArgument,
-    /// A named note, command, or document does not exist.
+    /// A named server, tool, command, or document does not exist.
     NotFound,
-    /// The store is not ready for the operation.
+    /// The configuration, the server, or its approval is not ready for the operation.
     PreconditionFailed,
-    /// The operation conflicts with the store's current state.
-    Conflict,
-    /// The store is busy; retrying can succeed.
+    /// The person declined approval or could not be asked.
+    PermissionDenied,
+    /// An HTTP server refused the request's credentials.
+    Unauthenticated,
+    /// A server or the daemon could not be reached; retrying can succeed.
     Unavailable,
+    /// No answer within `--timeout`.
+    Timeout,
+    /// The tool ran and reported an error.
+    ToolError,
+    /// The server answered with a protocol error.
+    ServerError,
     /// A defect in `mcp` itself, or a stdout that cannot take the result.
     Internal,
 }
 
 impl ErrorCode {
     /// Every code, in the order the reference lists them.
-    pub const ALL: [ErrorCode; 6] = [
+    pub const ALL: [ErrorCode; 10] = [
         ErrorCode::InvalidArgument,
         ErrorCode::NotFound,
         ErrorCode::PreconditionFailed,
-        ErrorCode::Conflict,
+        ErrorCode::PermissionDenied,
+        ErrorCode::Unauthenticated,
         ErrorCode::Unavailable,
+        ErrorCode::Timeout,
+        ErrorCode::ToolError,
+        ErrorCode::ServerError,
         ErrorCode::Internal,
     ];
 
@@ -39,8 +51,12 @@ impl ErrorCode {
             ErrorCode::InvalidArgument => "INVALID_ARGUMENT",
             ErrorCode::NotFound => "NOT_FOUND",
             ErrorCode::PreconditionFailed => "PRECONDITION_FAILED",
-            ErrorCode::Conflict => "CONFLICT",
+            ErrorCode::PermissionDenied => "PERMISSION_DENIED",
+            ErrorCode::Unauthenticated => "UNAUTHENTICATED",
             ErrorCode::Unavailable => "UNAVAILABLE",
+            ErrorCode::Timeout => "TIMEOUT",
+            ErrorCode::ToolError => "TOOL_ERROR",
+            ErrorCode::ServerError => "SERVER_ERROR",
             ErrorCode::Internal => "INTERNAL",
         }
     }
@@ -49,9 +65,12 @@ impl ErrorCode {
     pub fn exit_status(self) -> u8 {
         match self {
             ErrorCode::InvalidArgument => 2,
-            ErrorCode::NotFound | ErrorCode::PreconditionFailed => 3,
-            ErrorCode::Conflict => 4,
-            ErrorCode::Unavailable => 5,
+            ErrorCode::NotFound
+            | ErrorCode::PreconditionFailed
+            | ErrorCode::PermissionDenied
+            | ErrorCode::Unauthenticated => 3,
+            ErrorCode::Unavailable | ErrorCode::Timeout => 5,
+            ErrorCode::ToolError | ErrorCode::ServerError => 6,
             ErrorCode::Internal => 70,
         }
     }
@@ -65,23 +84,41 @@ impl ErrorCode {
     pub fn meaning(self) -> &'static str {
         match self {
             ErrorCode::InvalidArgument => {
-                "Input is missing or malformed; `details` names the argument and what it accepts."
+                "Input is missing or malformed: an argument, a tool flag, tool input that fails \
+                 the tool's inputSchema, or parameters the server rejected; `details` says which."
             }
-            ErrorCode::NotFound => "A named note, command, or document does not exist.",
+            ErrorCode::NotFound => "A named server, tool, command, or document does not exist.",
             ErrorCode::PreconditionFailed => {
-                "The store is not ready: it needs `mcp store migrate`, was written by a newer \
-                 mcp, or is not a mcp store."
+                "A configuration file is invalid, the server's entry is unusable, a variable it \
+                 needs is unset, MCP_REQUIRE_APPROVAL is invalid, approval is required and \
+                 missing, or the server has no tools."
             }
-            ErrorCode::Conflict => {
-                "The operation conflicts with the store's current state: the name is taken, or the \
-                 note's revision is not the one passed to --expect-revision."
+            ErrorCode::PermissionDenied => {
+                "The person declined to approve, could not be authenticated, or could not be asked."
+            }
+            ErrorCode::Unauthenticated => {
+                "An HTTP server answered 401 or 403; mcp does not sign in to servers with OAuth."
             }
             ErrorCode::Unavailable => {
-                "Another process holds the store's write lock; retry the same command."
+                "A server could not be started or reached, the connection was lost, the server \
+                 answered 429 or 5xx, or the daemon or the approvals file is busy; retry the same \
+                 command."
+            }
+            ErrorCode::Timeout => {
+                "No answer within --timeout. A tool call may still have run: verify its effect \
+                 before retrying, unless the tool declares readOnlyHint or idempotentHint."
+            }
+            ErrorCode::ToolError => {
+                "The tool ran and reported an error (isError); `details.result` holds its whole \
+                 result."
+            }
+            ErrorCode::ServerError => {
+                "The server answered with a protocol error; `details` carries its code, message, \
+                 and data."
             }
             ErrorCode::Internal => {
-                "A defect in mcp itself, or a stdout that cannot take the result; `message` \
-                 says which."
+                "A defect in mcp itself, or a stdout that cannot take the result; `message` says \
+                 which."
             }
         }
     }
@@ -131,8 +168,8 @@ impl Failure {
         Failure::new(ErrorCode::PreconditionFailed, message)
     }
 
-    pub fn conflict(message: impl Into<String>) -> Failure {
-        Failure::new(ErrorCode::Conflict, message)
+    pub fn unavailable(message: impl Into<String>) -> Failure {
+        Failure::new(ErrorCode::Unavailable, message)
     }
 
     pub fn internal(message: impl Into<String>) -> Failure {
@@ -167,7 +204,7 @@ pub struct ErrorBody {
     pub message: String,
     /// Whether running the same command again, unchanged, can succeed.
     pub retryable: bool,
-    /// Facts about the failure, such as the argument, the value, or the conflicting revision.
+    /// Facts about the failure, such as the argument, the server, or the file.
     pub details: Value,
     /// Commands or changes that recover from the failure, most useful first.
     pub suggestions: Vec<String>,
@@ -179,18 +216,18 @@ mod tests {
 
     #[test]
     fn the_document_carries_every_contract_field() {
-        let document = Failure::conflict("taken")
-            .with_details(json!({ "name": "groceries" }))
-            .suggest("mcp notes get groceries")
+        let document = Failure::not_found("no server `x`")
+            .with_details(json!({ "server": "x" }))
+            .suggest("mcp servers list")
             .to_json();
-        assert_eq!(document["error"]["code"], "CONFLICT");
+        assert_eq!(document["error"]["code"], "NOT_FOUND");
         assert_eq!(document["error"]["retryable"], false);
-        assert_eq!(document["error"]["details"]["name"], "groceries");
-        assert_eq!(document["error"]["suggestions"][0], "mcp notes get groceries");
+        assert_eq!(document["error"]["details"]["server"], "x");
+        assert_eq!(document["error"]["suggestions"][0], "mcp servers list");
     }
 
     #[test]
-    fn only_a_busy_store_is_retryable() {
+    fn only_an_unavailable_server_or_daemon_is_retryable() {
         let retryable: Vec<ErrorCode> =
             ErrorCode::ALL.into_iter().filter(|code| code.retryable()).collect();
         assert_eq!(retryable, [ErrorCode::Unavailable]);

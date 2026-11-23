@@ -6,7 +6,7 @@ edition.workspace = true
 publish.workspace = true
 repository.workspace = true
 rust-version.workspace = true
-description = "Agent-first command-line tool that keeps notes in a local SQLite store"
+description = "Agent-first command-line client for Model Context Protocol servers"
 
 # The library holds the commands so tests can reach the registry and parser in-process; the
 # binary is a shell around `mcp::app::run`.
@@ -18,24 +18,81 @@ path = "src/lib.rs"
 name = "mcp"
 path = "src/main.rs"
 
+# The deterministic MCP server the process tests and registered examples run against; never
+# shipped. `cargo test` builds it to `target/<profile>/examples/mcp-test-server`.
+[[example]]
+name = "mcp-test-server"
+path = "examples/mcp-test-server/main.rs"
+test = false
+
 [dependencies]
 clap = { version = "4.6", features = ["string"] }
-diesel = { version = "2.4", default-features = false, features = [
-    "sqlite",
-    "returning_clauses_for_sqlite_3_35",
-] }
-diesel_migrations = { version = "2.4", features = ["sqlite"] }
 jiff = { version = "1.0", default-features = false, features = ["std"] }
-# Compiles SQLite into the binary, so the CLI needs no system library on any target.
-libsqlite3-sys = { version = "0.40", features = ["bundled"] }
+# Validates a tool's input against its `inputSchema` before `mcp call` sends it.
+jsonschema = { version = "0.63", default-features = false }
+# The HTTP client rmcp's Streamable HTTP transport uses; named for its header and status types.
+reqwest = { version = "0.13", default-features = false }
+# The official MCP SDK, client side only: stdio servers as child processes, and Streamable HTTP
+# through reqwest with rustls, so the static musl builds need no system TLS library.
+rmcp = { version = "3.11", default-features = false, features = [
+    "client",
+    "transport-child-process",
+    "transport-streamable-http-client-reqwest",
+    "reqwest",
+] }
+# The current user's id names the daemon's directory under `$TMPDIR` when `XDG_RUNTIME_DIR` is unset.
+rustix = { version = "1.1", features = ["process"] }
 schemars = "1.2"
 serde = { version = "1.0", features = ["derive"] }
 # `preserve_order` writes JSON fields in declaration order: `status` before the rest of a receipt,
 # and an error's `code` and `message` before its `details`.
 serde_json = { version = "1.0", features = ["preserve_order"] }
+# Approval fingerprints.
+sha2 = "0.11"
+# The session daemon; command-line invocations stay synchronous.
+tokio = { version = "1.54", features = [
+    "io-util",
+    "macros",
+    "net",
+    "process",
+    "rt-multi-thread",
+    "signal",
+    "sync",
+    "time",
+] }
+
+# Asking the person to approve a project's servers: LocalAuthentication on macOS.
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSError",
+    "NSString",
+] }
+objc2-local-authentication = { version = "0.3", default-features = false, features = [
+    "std",
+    "block2",
+    "LAContext",
+    "LAError",
+] }
+
+# Asking the person on Linux: polkit over D-Bus, in pure Rust so the static musl builds keep working.
+# zbus 5 keeps the blocking API that the synchronous approval path uses.
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = "5.19"
+zbus_polkit = "5.1"
 
 [dev-dependencies]
-jsonschema = { version = "0.61", default-features = false }
+# The test server: axum puts rmcp's Streamable HTTP service at `/mcp` behind its header check.
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
+# The test server is the SDK's server side, over stdio and Streamable HTTP; Cargo adds these
+# features to the `rmcp` dependency only for test and example builds.
+rmcp = { version = "3.11", default-features = false, features = [
+    "server",
+    "transport-io",
+    "transport-streamable-http-server",
+] }
 tempfile = "3.27"
 
 [lints]

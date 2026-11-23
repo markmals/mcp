@@ -9,29 +9,31 @@ use crate::failure::{ErrorCode, ErrorDocument};
 use crate::registry::{self, ArgumentDescription, CommandDescription, GLOBAL_ARGUMENTS, RESOURCES};
 
 const INTRODUCTION: &str = "\
-`mcp` is an agent-first command-line tool for keeping notes in a local SQLite store. This page \
-is generated from the command registry by `mise run cli:reference`; do not edit it by hand.
+`mcp` is an agent-first command-line client for the Model Context Protocol servers configured \
+in a project's `.mcp.json` and the user's `$XDG_CONFIG_HOME/.mcp.json`. This page is generated \
+from the command registry by `mise run cli:reference`; do not edit it by hand.
 
 Every command follows one contract:
 
 - **Results** are JSON on stdout, whether or not stdout is a terminal: compact when piped, \
 indented on a terminal. `--output text` renders the same result for people. Warnings and errors \
 go to stderr.
-- **Collections** return `items`, `hasMore`, and `nextCursor`; pass `nextCursor` back as \
-`--cursor` until `hasMore` is false.
-- **Modifying commands** accept `--dry-run`, which validates the input, resolves the store, and \
-returns the receipt the command would produce without writing anything, not even a new store. \
-Receipts carry a `status` (`completed` or `dry-run`), the `store`, and the resulting resource.
+- **Collections** return `items` and `hasMore`; paged ones also `nextCursor`, which you pass back \
+as `--cursor` until `hasMore` is false. Commands that ask several servers also return `complete` \
+and the `unavailable` servers.
+- **Commands that change something** accept `--dry-run`, which validates the input, resolves the \
+target, and returns the receipt the command would produce without changing anything. Receipts \
+carry a `status`: `completed` or `dry-run`.
 - **Failures** write one JSON document to stderr and exit with the code's status (see below). \
 Nothing is written to stdout.
-- **No command prompts.** Missing input fails at once with `INVALID_ARGUMENT`.
-- **The store** is `--store`, else `MCP_STORE`, else `$XDG_DATA_HOME/mcp/store.sqlite3` \
-(`~/.local/share/mcp/store.sqlite3`, or `%LOCALAPPDATA%\\mcp\\store.sqlite3` on Windows). \
-`mcp context show` prints the one in effect.
+- **No command prompts.** Missing input fails at once with `INVALID_ARGUMENT`. Only `servers \
+approve` asks a person, through the system's own authentication dialog.
+- **Configuration** is `$XDG_CONFIG_HOME/.mcp.json` (`~/.config/.mcp.json`) and the nearest \
+project `.mcp.json`; `mcp context show` prints both, and `docs/configuration.md` describes them.
 
 Discover a command with `mcp cli search \"<task>\"`, inspect it with `mcp schema <resource> \
 <operation>`, preview it with `--dry-run`, run it, and verify the result with a read such as \
-`mcp notes get <name>`.";
+`mcp servers info <name>`.";
 
 /// The whole page.
 ///
@@ -143,11 +145,6 @@ fn argument_table(arguments: &[ArgumentDescription]) -> String {
             }
             (None, Some(minimum), Some(maximum)) => format!("integer, {minimum}–{maximum}"),
             (None, Some(minimum), None) => format!("integer, at least {minimum}"),
-            _ if argument.pattern.is_some() => format!(
-                "name: `{}`, at most {} characters",
-                argument.pattern.as_deref().unwrap_or_default(),
-                argument.max_length.unwrap_or_default()
-            ),
             _ if argument.multiple => format!("{}, repeatable", argument.value_type),
             _ => argument.value_type.clone(),
         };

@@ -1,9 +1,9 @@
 //! Release helpers for mcp, run as `cargo xtask <operation>`:
 //!
 //! - `package [<target>]` builds the release binary for a Rust target triple (default: this
-//!   machine's) and writes `artifacts/mcp-<target>.tar.gz` (`.zip` for Windows): one
-//!   top-level `mcp-<target>/` directory holding the executable. Mise's `github:` backend
-//!   and Homebrew both unpack that layout without options.
+//!   machine's) and writes `artifacts/mcp-<target>.tar.gz`: one top-level `mcp-<target>/`
+//!   directory holding the executable. Mise's `github:` backend and Homebrew both unpack that
+//!   layout without options.
 //! - `formula [--artifacts <dir>] [--output <file>]` writes the Homebrew formula for the version
 //!   in `crates/mcp/Cargo.toml`, pointing at the release's macOS and Linux archives in
 //!   `<dir>` (default `artifacts/`) with their SHA-256 digests. Default output:
@@ -11,7 +11,7 @@
 
 use std::fmt::Write as _;
 use std::fs::{self, File};
-use std::io::{self, Write as _};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
@@ -116,8 +116,7 @@ fn package(target: &str) -> Result<(), String> {
     if !status.success() {
         return Err(format!("cargo build for {target} failed"));
     }
-    let executable = executable_name(target);
-    let binary = metadata.target_directory.join(target).join("release").join(&executable);
+    let binary = metadata.target_directory.join(target).join("release").join(PACKAGE);
     let artifacts = metadata.workspace_root.join("artifacts");
     fs::create_dir_all(&artifacts)
         .map_err(|error| format!("cannot create {}: {error}", artifacts.display()))?;
@@ -128,49 +127,30 @@ fn package(target: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn executable_name(target: &str) -> String {
-    if is_windows(target) { format!("{PACKAGE}.exe") } else { PACKAGE.to_string() }
-}
-
-fn is_windows(target: &str) -> bool {
-    target.contains("-windows-")
-}
-
-/// `mcp-<target>.tar.gz`, or `.zip` for Windows: the Rust target triple in the name is what
-/// Mise's `github:` backend matches against the installing machine's OS, CPU, and C library.
+/// `mcp-<target>.tar.gz`: the Rust target triple in the name is what Mise's `github:` backend
+/// matches against the installing machine's OS, CPU, and C library.
 fn archive_name(target: &str) -> String {
-    let extension = if is_windows(target) { "zip" } else { "tar.gz" };
-    format!("{PACKAGE}-{target}.{extension}")
+    format!("{PACKAGE}-{target}.tar.gz")
 }
 
-/// Writes `binary` into `archive` as `mcp-<target>/<executable>`, mode 0755.
+/// Writes `binary` into `archive` as `mcp-<target>/mcp`, mode 0755.
 fn write_archive(binary: &Path, target: &str, archive: &Path) -> io::Result<()> {
-    let entry = format!("{PACKAGE}-{target}/{}", executable_name(target));
+    let entry = format!("{PACKAGE}-{target}/{PACKAGE}");
     let contents = fs::read(binary)?;
-    if is_windows(target) {
-        let mut zip = zip::ZipWriter::new(File::create(archive)?);
-        let options = zip::write::SimpleFileOptions::default()
-            .compression_method(zip::CompressionMethod::Deflated)
-            .unix_permissions(0o755);
-        zip.start_file(entry, options).map_err(io::Error::other)?;
-        zip.write_all(&contents)?;
-        zip.finish().map_err(io::Error::other)?;
-    } else {
-        let mut builder =
-            tar::Builder::new(GzEncoder::new(File::create(archive)?, Compression::best()));
-        let mut header = tar::Header::new_gnu();
-        header.set_size(u64::try_from(contents.len()).map_err(io::Error::other)?);
-        header.set_mode(0o755);
-        header.set_mtime(
-            fs::metadata(binary)?
-                .modified()?
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |since| since.as_secs()),
-        );
-        header.set_cksum();
-        builder.append_data(&mut header, entry, contents.as_slice())?;
-        builder.into_inner()?.finish()?;
-    }
+    let mut builder =
+        tar::Builder::new(GzEncoder::new(File::create(archive)?, Compression::best()));
+    let mut header = tar::Header::new_gnu();
+    header.set_size(u64::try_from(contents.len()).map_err(io::Error::other)?);
+    header.set_mode(0o755);
+    header.set_mtime(
+        fs::metadata(binary)?
+            .modified()?
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| since.as_secs()),
+    );
+    header.set_cksum();
+    builder.append_data(&mut header, entry, contents.as_slice())?;
+    builder.into_inner()?.finish()?;
     Ok(())
 }
 
@@ -210,7 +190,7 @@ fn sha256(contents: &[u8]) -> String {
     })
 }
 
-/// The Homebrew class name for a formula: `mcp` is `MyCli`.
+/// The Homebrew class name for a formula: `my-tool` is `MyTool`.
 fn class_name(formula: &str) -> String {
     formula
         .split(['-', '_'])
@@ -278,7 +258,7 @@ mod tests {
 
     #[test]
     fn class_names_follow_homebrew() {
-        assert_eq!(class_name("notes-cli"), "NotesCli");
+        assert_eq!(class_name("my-tool"), "MyTool");
         assert_eq!(class_name("tool"), "Tool");
         assert_eq!(class_name("a_b-c"), "ABC");
     }
@@ -289,19 +269,15 @@ mod tests {
             archive_name("aarch64-apple-darwin"),
             format!("{PACKAGE}-aarch64-apple-darwin.tar.gz")
         );
-        assert_eq!(
-            archive_name("x86_64-pc-windows-msvc"),
-            format!("{PACKAGE}-x86_64-pc-windows-msvc.zip")
-        );
     }
 
     #[test]
     fn the_formula_points_each_platform_at_its_archive() {
         let digests: Vec<String> = (0..4).map(|index| format!("{index}").repeat(64)).collect();
         let formula =
-            render_formula("1.2.3", "Keeps \"notes\"", "https://github.com/o/r", &digests);
+            render_formula("1.2.3", "Calls \"MCP\" tools", "https://github.com/o/r", &digests);
         assert!(formula.contains(&format!("class {} < Formula", class_name(PACKAGE))));
-        assert!(formula.contains(r#"desc "Keeps \"notes\"""#));
+        assert!(formula.contains(r#"desc "Calls \"MCP\" tools""#));
         let arm_mac = format!(
             "https://github.com/o/r/releases/download/v1.2.3/{PACKAGE}-aarch64-apple-darwin.tar.gz"
         );
@@ -332,17 +308,6 @@ mod tests {
         entry.read_to_string(&mut contents).unwrap();
         assert_eq!(contents, "executable");
         assert!(entries.next().is_none());
-
-        let target = "x86_64-pc-windows-msvc";
-        let zipfile = directory.path().join(archive_name(target));
-        write_archive(&binary, target, &zipfile).unwrap();
-        let mut archive = zip::ZipArchive::new(File::open(&zipfile).unwrap()).unwrap();
-        assert_eq!(archive.len(), 1);
-        let mut entry = archive.by_index(0).unwrap();
-        assert_eq!(entry.name().unwrap(), format!("{PACKAGE}-{target}/{PACKAGE}.exe"));
-        let mut contents = String::new();
-        entry.read_to_string(&mut contents).unwrap();
-        assert_eq!(contents, "executable");
     }
 
     #[test]

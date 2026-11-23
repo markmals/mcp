@@ -36,16 +36,15 @@ jobs:
                   cache-on-failure: true
             - run: mise run check
 
-    # The gate runs on Linux. These jobs build and test the CLI on the other systems its archives
-    # ship for, including Windows with its `.exe` suffix, path separators, and line endings.
-    # Workbench ships no Windows build, so they install only Rust and run tasks without
+    # The gate runs on Linux. This job builds and tests the CLI on macOS, the other system its
+    # archives ship for. It needs only Rust, so it installs only Rust and runs tasks without
     # installing the rest of mise.toml.
     build-and-test:
         name: Build and test (${{ matrix.os }})
         strategy:
             fail-fast: false
             matrix:
-                os: [macos-latest, windows-latest]
+                os: [macos-latest]
         runs-on: ${{ matrix.os }}
         permissions:
             contents: read

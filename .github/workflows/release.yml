@@ -1,5 +1,5 @@
 # Merging Knope's release pull request is the explicit release authorization the process
-# requires. This workflow runs the gate and builds, smoke-tests and attests the five archives;
+# requires. This workflow runs the gate and builds, smoke-tests and attests the four archives;
 # only when all of that passes does `knope release` tag `v<version>` and publish the GitHub
 # release with the archives and the changelog entry. This CLI has no irreversible registry
 # publish, so the GitHub release is the last irreversible step. The Homebrew formula update

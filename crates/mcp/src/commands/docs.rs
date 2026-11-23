@@ -17,7 +17,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         id: "docs.search",
         path: &["docs", "search"],
-        summary: "Search mcp's documentation: concepts, the store, and the CLI reference",
+        summary: "Search mcp's documentation: configuration, approval, sessions, tools, the CLI",
         description: "Ranks every section of the Markdown compiled into this binary against the \
             query and returns the best matches: the document `path`, its `title`, the `section` \
             heading, an `excerpt` of the best-matching paragraph, and a `score`. Read a whole \
@@ -53,7 +53,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         path: &["docs", "show"],
         summary: "Print one documentation file in full",
         description: "Returns the Markdown of one document compiled into this binary, by the \
-            `path` that `mcp docs search` reports, such as `docs/notes.md`. `--output text` \
+            `path` that `mcp docs search` reports, such as `docs/tools.md`. `--output text` \
             prints the Markdown alone. Never changes anything.",
         arguments: &[ArgumentSpec {
             name: "path",
@@ -62,7 +62,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             required: true,
             default: None,
             multiple: false,
-            summary: "The document, as `docs search` names it: `docs/notes.md`",
+            summary: "The document, as `docs search` names it: `docs/tools.md`",
         }],
         effect: Effect::Reads,
         requires: &[],
@@ -70,8 +70,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         idempotent: true,
         errors: &[ErrorCode::NotFound],
         examples: &[Example {
-            summary: "Read the notes concepts",
-            args: &["docs", "show", "docs/notes.md"],
+            summary: "Read how tool flags work",
+            args: &["docs", "show", "docs/tools.md"],
         }],
         synonyms: &["read", "open", "view", "print", "document", "file"],
         output_schema: || schema_for!(DocumentContent),

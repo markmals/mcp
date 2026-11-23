@@ -3,15 +3,17 @@
 
 /// One shipped document.
 pub struct Document {
-    /// Where the file lives in the crate, which is also how commands name it: `docs/notes.md`.
+    /// Where the file lives in the crate, which is also how commands name it: `docs/tools.md`.
     pub path: &'static str,
     pub source: &'static str,
 }
 
 /// Every shipped document. A test fails when a file in `docs/` is missing here.
 pub const DOCUMENTS: &[Document] = &[
-    Document { path: "docs/notes.md", source: include_str!("../docs/notes.md") },
-    Document { path: "docs/store.md", source: include_str!("../docs/store.md") },
+    Document { path: "docs/configuration.md", source: include_str!("../docs/configuration.md") },
+    Document { path: "docs/tools.md", source: include_str!("../docs/tools.md") },
+    Document { path: "docs/sessions.md", source: include_str!("../docs/sessions.md") },
+    Document { path: "docs/approval.md", source: include_str!("../docs/approval.md") },
     Document { path: "docs/cli.md", source: include_str!("../docs/cli.md") },
 ];
 

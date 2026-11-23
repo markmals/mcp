@@ -1,17 +1,17 @@
 # CLI reference
 
-`mcp` is an agent-first command-line tool for keeping notes in a local SQLite store. This page is generated from the command registry by `mise run cli:reference`; do not edit it by hand.
+`mcp` is an agent-first command-line client for the Model Context Protocol servers configured in a project's `.mcp.json` and the user's `$XDG_CONFIG_HOME/.mcp.json`. This page is generated from the command registry by `mise run cli:reference`; do not edit it by hand.
 
 Every command follows one contract:
 
 - **Results** are JSON on stdout, whether or not stdout is a terminal: compact when piped, indented on a terminal. `--output text` renders the same result for people. Warnings and errors go to stderr.
-- **Collections** return `items`, `hasMore`, and `nextCursor`; pass `nextCursor` back as `--cursor` until `hasMore` is false.
-- **Modifying commands** accept `--dry-run`, which validates the input, resolves the store, and returns the receipt the command would produce without writing anything, not even a new store. Receipts carry a `status` (`completed` or `dry-run`), the `store`, and the resulting resource.
+- **Collections** return `items` and `hasMore`; paged ones also `nextCursor`, which you pass back as `--cursor` until `hasMore` is false. Commands that ask several servers also return `complete` and the `unavailable` servers.
+- **Commands that change something** accept `--dry-run`, which validates the input, resolves the target, and returns the receipt the command would produce without changing anything. Receipts carry a `status`: `completed` or `dry-run`.
 - **Failures** write one JSON document to stderr and exit with the code's status (see below). Nothing is written to stdout.
-- **No command prompts.** Missing input fails at once with `INVALID_ARGUMENT`.
-- **The store** is `--store`, else `MCP_STORE`, else `$XDG_DATA_HOME/mcp/store.sqlite3` (`~/.local/share/mcp/store.sqlite3`, or `%LOCALAPPDATA%\mcp\store.sqlite3` on Windows). `mcp context show` prints the one in effect.
+- **No command prompts.** Missing input fails at once with `INVALID_ARGUMENT`. Only `servers approve` asks a person, through the system's own authentication dialog.
+- **Configuration** is `$XDG_CONFIG_HOME/.mcp.json` (`~/.config/.mcp.json`) and the nearest project `.mcp.json`; `mcp context show` prints both, and `docs/configuration.md` describes them.
 
-Discover a command with `mcp cli search "<task>"`, inspect it with `mcp schema <resource> <operation>`, preview it with `--dry-run`, run it, and verify the result with a read such as `mcp notes get <name>`.
+Discover a command with `mcp cli search "<task>"`, inspect it with `mcp schema <resource> <operation>`, preview it with `--dry-run`, run it, and verify the result with a read such as `mcp servers info <name>`.
 
 ## Options every command accepts
 
@@ -23,11 +23,15 @@ Discover a command with `mcp cli search "<task>"`, inspect it with `mcp schema <
 
 | Code | Exit | Retryable | Meaning |
 | --- | --- | --- | --- |
-| `INVALID_ARGUMENT` | 2 | no | Input is missing or malformed; `details` names the argument and what it accepts. |
-| `NOT_FOUND` | 3 | no | A named note, command, or document does not exist. |
-| `PRECONDITION_FAILED` | 3 | no | The store is not ready: it needs `mcp store migrate`, was written by a newer mcp, or is not a mcp store. |
-| `CONFLICT` | 4 | no | The operation conflicts with the store's current state: the name is taken, or the note's revision is not the one passed to --expect-revision. |
-| `UNAVAILABLE` | 5 | yes | Another process holds the store's write lock; retry the same command. |
+| `INVALID_ARGUMENT` | 2 | no | Input is missing or malformed: an argument, a tool flag, tool input that fails the tool's inputSchema, or parameters the server rejected; `details` says which. |
+| `NOT_FOUND` | 3 | no | A named server, tool, command, or document does not exist. |
+| `PRECONDITION_FAILED` | 3 | no | A configuration file is invalid, the server's entry is unusable, a variable it needs is unset, MCP_REQUIRE_APPROVAL is invalid, approval is required and missing, or the server has no tools. |
+| `PERMISSION_DENIED` | 3 | no | The person declined to approve, could not be authenticated, or could not be asked. |
+| `UNAUTHENTICATED` | 3 | no | An HTTP server answered 401 or 403; mcp does not sign in to servers with OAuth. |
+| `UNAVAILABLE` | 5 | yes | A server could not be started or reached, the connection was lost, the server answered 429 or 5xx, or the daemon or the approvals file is busy; retry the same command. |
+| `TIMEOUT` | 5 | no | No answer within --timeout. A tool call may still have run: verify its effect before retrying, unless the tool declares readOnlyHint or idempotentHint. |
+| `TOOL_ERROR` | 6 | no | The tool ran and reported an error (isError); `details.result` holds its whole result. |
+| `SERVER_ERROR` | 6 | no | The server answered with a protocol error; `details` carries its code, message, and data. |
 | `INTERNAL` | 70 | no | A defect in mcp itself, or a stdout that cannot take the result; `message` says which. |
 
 Every failure writes this document to stderr:
@@ -63,7 +67,7 @@ Every failure writes this document to stderr:
           "type": "boolean"
         },
         "details": {
-          "description": "Facts about the failure, such as the argument, the value, or the conflicting revision."
+          "description": "Facts about the failure, such as the argument, the server, or the file."
         },
         "suggestions": {
           "description": "Commands or changes that recover from the failure, most useful first.",
@@ -90,24 +94,44 @@ Every failure writes this document to stderr:
           "const": "INVALID_ARGUMENT"
         },
         {
-          "description": "A named note, command, or document does not exist.",
+          "description": "A named server, tool, command, or document does not exist.",
           "type": "string",
           "const": "NOT_FOUND"
         },
         {
-          "description": "The store is not ready for the operation.",
+          "description": "The configuration, the server, or its approval is not ready for the operation.",
           "type": "string",
           "const": "PRECONDITION_FAILED"
         },
         {
-          "description": "The operation conflicts with the store's current state.",
+          "description": "The person declined approval or could not be asked.",
           "type": "string",
-          "const": "CONFLICT"
+          "const": "PERMISSION_DENIED"
         },
         {
-          "description": "The store is busy; retrying can succeed.",
+          "description": "An HTTP server refused the request's credentials.",
+          "type": "string",
+          "const": "UNAUTHENTICATED"
+        },
+        {
+          "description": "A server or the daemon could not be reached; retrying can succeed.",
           "type": "string",
           "const": "UNAVAILABLE"
+        },
+        {
+          "description": "No answer within `--timeout`.",
+          "type": "string",
+          "const": "TIMEOUT"
+        },
+        {
+          "description": "The tool ran and reported an error.",
+          "type": "string",
+          "const": "TOOL_ERROR"
+        },
+        {
+          "description": "The server answered with a protocol error.",
+          "type": "string",
+          "const": "SERVER_ERROR"
         },
         {
           "description": "A defect in `mcp` itself, or a stdout that cannot take the result.",
@@ -147,10 +171,10 @@ Ranks every command against the query by its name, summary, description, argumen
 Examples:
 
 ```sh
-# Find how to add a note
-mcp cli search 'add a note'
-# Find how to change a note, three matches at most
-mcp cli search 'edit the title of a note' --limit 3
+# Find how to call a tool
+mcp cli search 'call a tool'
+# Find how to approve a project's servers, three matches at most
+mcp cli search 'trust the servers in this repository' --limit 3
 ```
 
 Result schema:
@@ -194,7 +218,7 @@ Result schema:
         },
         "id": {
           "type": "string",
-          "description": "The registry identifier, such as `notes.create`."
+          "description": "The registry identifier, such as `tools.info`."
         },
         "summary": {
           "type": "string"
@@ -230,7 +254,7 @@ Inspect a command's full specification.
 
 Show a command's arguments, defaults, effects, errors, examples, and output schema.
 
-With no command, lists every command with its summary and effect. With a command path such as `notes create` (or its identifier, `notes.create`), returns that command's full registry entry: each argument with its type, whether it is required, its default, and its accepted values or bounds; whether it reads or modifies state and what it requires; whether it supports --dry-run and is idempotent; the error codes it can return with their exit statuses; examples; and the JSON Schema of its result. Never changes anything.
+With no command, lists every command with its summary and effect. With a command path such as `tools info` (or its identifier, `tools.info`), returns that command's full registry entry: each argument with its type, whether it is required, its default, and its accepted values or bounds; whether it reads or modifies state and what it requires; whether it supports --dry-run and is idempotent; the error codes it can return with their exit statuses; examples; and the JSON Schema of its result. Never changes anything.
 
 - **Effect:** reads only
 - **Requires:** nothing beyond `mcp`
@@ -240,15 +264,15 @@ With no command, lists every command with its summary and effect. With a command
 
 | Argument | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
-| `<command>` | string, repeatable | no | — | The command path, such as `notes create`; omit to list every command |
+| `<command>` | string, repeatable | no | — | The command path, such as `tools info`; omit to list every command |
 
 Examples:
 
 ```sh
 # List every command
 mcp schema
-# Inspect note creation
-mcp schema notes create
+# Inspect calling a tool
+mcp schema call
 ```
 
 Result schema:
@@ -338,7 +362,7 @@ Result schema:
           "items": {
             "type": "string"
           },
-          "description": "What the command needs besides mcp: `store` is the note store `mcp context show`\nreports."
+          "description": "What the command needs besides mcp: `configuration` (the `.mcp.json` files `mcp\ncontext show` reports), `servers` (the configured servers, through the session daemon),\nor `person` (someone at the machine to confirm)."
         },
         "dryRun": {
           "type": "boolean",
@@ -389,15 +413,15 @@ Result schema:
         },
         "kind": {
           "type": "string",
-          "description": "`positional`, `option`, or `flag`."
+          "description": "`positional`, `option`, `flag`, or `trailing` (every word after the positionals, passed\nthrough to the tool)."
         },
         "usage": {
           "type": "string",
-          "description": "How to write it: `<name>`, `--limit <integer>`, `--dry-run`."
+          "description": "How to write it: `<name>`, `--limit <integer>`, `--dry-run`, `[--<property> <value>]...`."
         },
         "type": {
           "type": "string",
-          "description": "`string`, `path`, `integer`, `name` (matches `pattern`), `text` (text, `@<file>`, or `-`\nfor stdin), `choice`, or `boolean`."
+          "description": "`string`, `path`, `integer`, `text` (text, `@<file>`, or `-` for stdin), `choice`, or\n`boolean`."
         },
         "required": {
           "type": "boolean"
@@ -440,22 +464,6 @@ Result schema:
           "minimum": 0,
           "description": "The largest `integer` accepted."
         },
-        "pattern": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "description": "The regular expression a `name` matches."
-        },
-        "maxLength": {
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint",
-          "minimum": 0,
-          "description": "The most characters a `name` may have."
-        },
         "summary": {
           "type": "string"
         }
@@ -475,14 +483,14 @@ Result schema:
       "properties": {
         "kind": {
           "type": "string",
-          "description": "`reads` or `modifies`."
+          "description": "`reads`, `modifies`, `connects` (starts or reuses server sessions), or `calls` (a\nserver's tool)."
         },
         "what": {
           "type": [
             "string",
             "null"
           ],
-          "description": "What a modifying command changes."
+          "description": "What the command changes, connects to, or calls."
         }
       },
       "required": [
@@ -542,7 +550,7 @@ Search and read mcp's documentation.
 
 #### `mcp docs search`
 
-Search mcp's documentation: concepts, the store, and the CLI reference.
+Search mcp's documentation: configuration, approval, sessions, tools, the CLI.
 
 Ranks every section of the Markdown compiled into this binary against the query and returns the best matches: the document `path`, its `title`, the `section` heading, an `excerpt` of the best-matching paragraph, and a `score`. Read a whole document with `mcp docs show <path>`. Runs offline and never changes anything.
 
@@ -639,7 +647,7 @@ Result schema:
 
 Print one documentation file in full.
 
-Returns the Markdown of one document compiled into this binary, by the `path` that `mcp docs search` reports, such as `docs/notes.md`. `--output text` prints the Markdown alone. Never changes anything.
+Returns the Markdown of one document compiled into this binary, by the `path` that `mcp docs search` reports, such as `docs/tools.md`. `--output text` prints the Markdown alone. Never changes anything.
 
 - **Effect:** reads only
 - **Requires:** nothing beyond `mcp`
@@ -649,13 +657,13 @@ Returns the Markdown of one document compiled into this binary, by the `path` th
 
 | Argument | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
-| `<path>` | string | yes | — | The document, as `docs search` names it: `docs/notes.md` |
+| `<path>` | string | yes | — | The document, as `docs search` names it: `docs/tools.md` |
 
 Examples:
 
 ```sh
-# Read the notes concepts
-mcp docs show docs/notes.md
+# Read how tool flags work
+mcp docs show docs/tools.md
 ```
 
 Result schema:
@@ -688,28 +696,24 @@ Result schema:
 
 ### `context`
 
-Show where commands take effect.
+Show the configuration, workspace, approvals, and daemon in effect.
 
 #### `mcp context show`
 
-Show the store commands read and write, where its path came from, and its state.
+Show the configuration files, workspace, approval setting, and session daemon in use.
 
-Resolves the store exactly as every other command does (`--store`, else MCP_STORE, else the default data location) and reports its absolute `path`, the `source` of that path, and its `state`: `absent` (the first change creates it), `ready` (with the number of `notes`), `needs-migration` (with `pendingMigrations`; run `mcp store migrate`), or `unusable` (with the `problem`). Never creates or changes the store, and reports an unusable store instead of failing.
+Reports the workspace and why it was chosen; each configuration file mcp reads (the user's `$XDG_CONFIG_HOME/.mcp.json` and the project's nearest `.mcp.json`) with whether it exists, how many servers it declares, and any problem with it; whether approval is required (MCP_REQUIRE_APPROVAL) and where approvals are kept; and the session daemon's socket, whether it is running, and how many sessions it holds. Works while a configuration file is invalid, and never starts the daemon or a server.
 
 - **Effect:** reads only
-- **Requires:** `store`
+- **Requires:** `configuration`
 - **Dry run:** no
 - **Idempotent:** yes
-- **Errors:** `INVALID_ARGUMENT`, `PRECONDITION_FAILED`, `UNAVAILABLE`, `INTERNAL`
-
-| Argument | Type | Required | Default | Description |
-| --- | --- | --- | --- | --- |
-| `--store <path>` | path | no | — | The note store, a SQLite file; overrides MCP_STORE and the default location. `mcp context show` prints the store in effect |
+- **Errors:** `PRECONDITION_FAILED`, `INTERNAL`
 
 Examples:
 
 ```sh
-# Show the store in effect
+# Show what mcp reads and where
 mcp context show
 ```
 
@@ -723,105 +727,194 @@ Result schema:
       "type": "string",
       "description": "The mcp version answering."
     },
-    "store": {
-      "$ref": "#/$defs/StoreContext"
+    "workspace": {
+      "$ref": "#/$defs/WorkspaceContext"
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/FileContext"
+      },
+      "description": "The user file, then the project file when one was found."
+    },
+    "approval": {
+      "$ref": "#/$defs/ApprovalContext"
+    },
+    "daemon": {
+      "$ref": "#/$defs/DaemonContext"
     }
   },
   "required": [
     "version",
-    "store"
+    "workspace",
+    "files",
+    "approval",
+    "daemon"
   ],
-  "description": "Where commands take effect.",
   "title": "Context",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$defs": {
-    "StoreContext": {
+    "WorkspaceContext": {
       "type": "object",
       "properties": {
         "path": {
           "type": "string",
-          "description": "The store's absolute path."
+          "description": "The directory sessions belong to and stdio servers start in."
         },
-        "source": {
-          "$ref": "#/$defs/StoreSource",
-          "description": "Where the path came from: `flag` (--store), `environment` (MCP_STORE), or `default`."
+        "reason": {
+          "$ref": "#/$defs/WorkspaceReason"
         },
-        "environmentVariable": {
-          "type": "string",
-          "description": "The environment variable that selects the store when --store is absent."
-        },
-        "state": {
-          "$ref": "#/$defs/StoreState"
-        },
-        "notes": {
+        "gitWorktree": {
           "type": [
-            "integer",
+            "string",
             "null"
           ],
-          "format": "int64",
-          "description": "How many notes a `ready` store holds; null otherwise."
+          "description": "The root of the enclosing git worktree; null outside git."
+        }
+      },
+      "required": [
+        "path",
+        "reason"
+      ]
+    },
+    "WorkspaceReason": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "project-file",
+          "description": "It holds the project file."
         },
-        "pendingMigrations": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Migrations `mcp store migrate` would apply; empty unless `needs-migration`."
+        {
+          "type": "string",
+          "const": "git-worktree",
+          "description": "It is the root of the git worktree; there is no project file."
+        },
+        {
+          "type": "string",
+          "const": "working-directory",
+          "description": "Neither a project file nor a git worktree encloses the working directory."
+        }
+      ],
+      "description": "Why the workspace is the directory it is."
+    },
+    "FileContext": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/Source"
+        },
+        "path": {
+          "type": "string"
+        },
+        "exists": {
+          "type": "boolean"
+        },
+        "servers": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "description": "How many servers it declares."
         },
         "problem": {
           "type": [
             "string",
             "null"
           ],
-          "description": "Why an `unusable` store cannot be used; null otherwise."
+          "description": "Why it is invalid or unreadable; null when it is fine or absent."
         }
       },
       "required": [
-        "path",
         "source",
-        "environmentVariable",
-        "state",
-        "pendingMigrations"
+        "path",
+        "exists",
+        "servers"
       ]
     },
-    "StoreSource": {
+    "Source": {
       "oneOf": [
         {
           "type": "string",
-          "const": "flag",
-          "description": "`--store`."
+          "const": "project",
+          "description": "The nearest `.mcp.json` of the working directory's project."
         },
         {
           "type": "string",
-          "const": "environment",
-          "description": "The `MCP_STORE` environment variable."
-        },
-        {
-          "type": "string",
-          "const": "default",
-          "description": "`$XDG_DATA_HOME/mcp/store.sqlite3`, else `~/.local/share/mcp/store.sqlite3`\n(`%LOCALAPPDATA%\\mcp\\store.sqlite3` on Windows)."
+          "const": "user",
+          "description": "`$XDG_CONFIG_HOME/.mcp.json`, which applies in every directory."
         }
       ],
-      "description": "Where the store path came from."
+      "description": "Which configuration file a server comes from."
     },
-    "StoreState": {
+    "ApprovalContext": {
+      "type": "object",
+      "properties": {
+        "required": {
+          "type": "boolean",
+          "description": "Whether a project's servers need a person's approval."
+        },
+        "variable": {
+          "type": "string",
+          "description": "The environment variable that sets `required`."
+        },
+        "file": {
+          "type": "string",
+          "description": "The file approvals are kept in."
+        },
+        "problem": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Why MCP_REQUIRE_APPROVAL or the approvals file is unusable; null when both are fine."
+        }
+      },
+      "required": [
+        "required",
+        "variable",
+        "file"
+      ]
+    },
+    "DaemonContext": {
+      "type": "object",
+      "properties": {
+        "socket": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/DaemonRunState"
+        },
+        "pid": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "sessions": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "description": "Sessions it holds in every workspace."
+        }
+      },
+      "required": [
+        "socket",
+        "state",
+        "sessions"
+      ]
+    },
+    "DaemonRunState": {
       "oneOf": [
         {
           "type": "string",
-          "enum": [
-            "ready",
-            "unusable"
-          ]
+          "const": "running",
+          "description": "It answers on its socket."
         },
         {
           "type": "string",
-          "const": "absent",
-          "description": "No store yet; the first change creates it."
-        },
-        {
-          "type": "string",
-          "const": "needs-migration",
-          "description": "`mcp store migrate` must upgrade it before other commands use it."
+          "const": "stopped",
+          "description": "Nothing answers; the next command that needs a session starts it."
         }
       ]
     }
@@ -829,35 +922,32 @@ Result schema:
 }
 ```
 
-### `notes`
+### `servers`
 
-Create, read, update, and delete notes.
+List, inspect, approve, and disconnect configured MCP servers.
 
-#### `mcp notes list`
+#### `mcp servers list`
 
-List notes in name order, one page at a time.
+List the configured MCP servers, where each comes from, and whether it is usable.
 
-Returns up to --limit notes in name order as `items`, with `hasMore` and `nextCursor`; pass `nextCursor` back as --cursor for the next page, until `hasMore` is false. A store that does not exist yet lists no notes and says so on stderr. Never changes anything.
+Reads the user's `$XDG_CONFIG_HOME/.mcp.json` and the project's nearest `.mcp.json`; a project server replaces the user server of the same name. Each item gives the server's name, its `source` (`project` or `user`) and `file`, its `transport`, its `target` (the command line or URL as written), its `approval` state, whether it is `usable` now and the `problem` when it is not, and whether a session is `connected`. Never starts a server or the session daemon. Fails while either configuration file is invalid.
 
 - **Effect:** reads only
-- **Requires:** `store`
+- **Requires:** `configuration`
 - **Dry run:** no
 - **Idempotent:** yes
-- **Errors:** `INVALID_ARGUMENT`, `PRECONDITION_FAILED`, `UNAVAILABLE`, `INTERNAL`
+- **Errors:** `INVALID_ARGUMENT`, `PRECONDITION_FAILED`, `INTERNAL`
 
 | Argument | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
-| `--limit <integer>` | integer, 1–100 | no | `20` | The most notes to return |
-| `--cursor <name>` | name: `^[a-z0-9]+(-[a-z0-9]+)*$`, at most 64 characters | no | — | Resume after a previous page: the nextCursor it returned |
-| `--store <path>` | path | no | — | The note store, a SQLite file; overrides MCP_STORE and the default location. `mcp context show` prints the store in effect |
+| `--limit <integer>` | integer, 1–200 | no | `50` | The most items to return |
+| `--cursor <string>` | string | no | — | Resume after a previous page: the nextCursor it returned |
 
 Examples:
 
 ```sh
-# List the first page of notes
-mcp notes list
-# List one note at a time
-mcp notes list --limit 1
+# List every configured server
+mcp servers list
 ```
 
 Result schema:
@@ -869,7 +959,7 @@ Result schema:
     "items": {
       "type": "array",
       "items": {
-        "$ref": "#/$defs/Note"
+        "$ref": "#/$defs/ServerSummary"
       }
     },
     "hasMore": {
@@ -892,71 +982,140 @@ Result schema:
   "title": "Page",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$defs": {
-    "Note": {
+    "ServerSummary": {
       "type": "object",
       "properties": {
         "name": {
-          "type": "string",
-          "description": "Stable identifier: lowercase letters and digits in hyphen-separated words."
+          "type": "string"
         },
-        "title": {
-          "type": "string",
-          "description": "One line."
+        "source": {
+          "$ref": "#/$defs/Source"
         },
-        "body": {
+        "file": {
           "type": "string",
-          "description": "Free text; empty when the note has none."
+          "description": "The configuration file that declares it."
         },
-        "revision": {
-          "type": "integer",
-          "format": "int64",
-          "description": "Starts at 1 and increases on every change. Pass it to `--expect-revision` to change\nonly the version you read."
+        "transport": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TransportKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Null when the entry is too malformed to say."
         },
-        "createdAt": {
-          "type": "string",
-          "description": "When the note was created: RFC 3339, UTC, millisecond precision."
+        "target": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The command line or URL as written, before `${VAR}` expansion."
         },
-        "updatedAt": {
-          "type": "string",
-          "description": "When the note last changed: RFC 3339, UTC, millisecond precision."
+        "approval": {
+          "$ref": "#/$defs/ApprovalState"
+        },
+        "usable": {
+          "type": "boolean",
+          "description": "Whether mcp can connect to it now."
+        },
+        "problem": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Why it is not usable; null when it is."
+        },
+        "connected": {
+          "type": "boolean",
+          "description": "Whether the session daemon holds a session for it in this workspace."
         }
       },
       "required": [
         "name",
-        "title",
-        "body",
-        "revision",
-        "createdAt",
-        "updatedAt"
+        "source",
+        "file",
+        "approval",
+        "usable",
+        "connected"
       ],
-      "description": "One note as stored."
+      "description": "One configured server."
+    },
+    "Source": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "project",
+          "description": "The nearest `.mcp.json` of the working directory's project."
+        },
+        {
+          "type": "string",
+          "const": "user",
+          "description": "`$XDG_CONFIG_HOME/.mcp.json`, which applies in every directory."
+        }
+      ],
+      "description": "Which configuration file a server comes from."
+    },
+    "TransportKind": {
+      "type": "string",
+      "enum": [
+        "stdio",
+        "http"
+      ],
+      "description": "How `mcp` talks to a server."
+    },
+    "ApprovalState": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "approved",
+          "description": "A person approved this configuration as it is written."
+        },
+        {
+          "type": "string",
+          "const": "unapproved",
+          "description": "No approval exists for this server in this repository."
+        },
+        {
+          "type": "string",
+          "const": "changed",
+          "description": "A person approved an earlier configuration of this server."
+        },
+        {
+          "type": "string",
+          "const": "not-required",
+          "description": "A user-file server, which never needs approval."
+        }
+      ],
+      "description": "Whether a server's configuration, as written, has a person's approval."
     }
   }
 }
 ```
 
-#### `mcp notes get`
+#### `mcp servers info`
 
-Read one note by name.
+Show a server's configuration and what it declares: name, version, capabilities.
 
-Returns the note with its `revision` and timestamps. Use it to verify a change, or to learn the revision to pass to --expect-revision. Never changes anything.
+Reports everything `servers list` does for one server, plus the names of its `env` and `headers` (never their values), its approval `fingerprint`, and the user file whose server it replaces. When the server is usable, starts or reuses its session and adds `live`: the session and what the server declared (its serverInfo, protocol version, capabilities, instructions, and recent stderr). When it is not, or the connection fails, `live` is null, `problem` says why, and the command still succeeds.
 
-- **Effect:** reads only
-- **Requires:** `store`
+- **Effect:** modifies starts or reuses server sessions; never calls a tool
+- **Requires:** `configuration`, `servers`
 - **Dry run:** no
 - **Idempotent:** yes
-- **Errors:** `INVALID_ARGUMENT`, `NOT_FOUND`, `PRECONDITION_FAILED`, `UNAVAILABLE`, `INTERNAL`
+- **Errors:** `INVALID_ARGUMENT`, `NOT_FOUND`, `PRECONDITION_FAILED`, `INTERNAL`
 
 | Argument | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
-| `<name>` | name: `^[a-z0-9]+(-[a-z0-9]+)*$`, at most 64 characters | yes | — | The note's name |
-| `--store <path>` | path | no | — | The note store, a SQLite file; overrides MCP_STORE and the default location. `mcp context show` prints the store in effect |
+| `<name>` | string | yes | — | The server's name, as `mcp servers list` shows it |
+| `--timeout <integer>` | integer, 1–3600 | no | `120` | Seconds to wait for each server, starting its session and answering together |
 
 Examples:
 
 ```sh
-# Read the note `groceries`
-mcp notes get groceries
+# Inspect the server `demo`
+mcp servers info demo
 ```
 
 Result schema:
@@ -966,239 +1125,252 @@ Result schema:
   "type": "object",
   "properties": {
     "name": {
-      "type": "string",
-      "description": "Stable identifier: lowercase letters and digits in hyphen-separated words."
+      "type": "string"
     },
-    "title": {
-      "type": "string",
-      "description": "One line."
+    "source": {
+      "$ref": "#/$defs/Source"
     },
-    "body": {
+    "file": {
       "type": "string",
-      "description": "Free text; empty when the note has none."
+      "description": "The configuration file that declares it."
     },
-    "revision": {
-      "type": "integer",
-      "format": "int64",
-      "description": "Starts at 1 and increases on every change. Pass it to `--expect-revision` to change\nonly the version you read."
+    "transport": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TransportKind"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Null when the entry is too malformed to say."
     },
-    "createdAt": {
+    "target": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The command line or URL as written, before `${VAR}` expansion."
+    },
+    "approval": {
+      "$ref": "#/$defs/ApprovalState"
+    },
+    "usable": {
+      "type": "boolean",
+      "description": "Whether mcp can connect to it now."
+    },
+    "problem": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Why it is not usable; null when it is."
+    },
+    "connected": {
+      "type": "boolean",
+      "description": "Whether the session daemon holds a session for it in this workspace."
+    },
+    "env": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "The names of its `env` variables; values are never shown."
+    },
+    "headers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "The names of its `headers`; values are never shown."
+    },
+    "fingerprint": {
       "type": "string",
-      "description": "When the note was created: RFC 3339, UTC, millisecond precision."
+      "description": "What an approval of this configuration is bound to."
     },
-    "updatedAt": {
-      "type": "string",
-      "description": "When the note last changed: RFC 3339, UTC, millisecond precision."
+    "replaces": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The user file whose server of the same name this project server replaces."
+    },
+    "live": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Live"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The session and what the server declared; null when mcp did not connect."
     }
   },
   "required": [
     "name",
-    "title",
-    "body",
-    "revision",
-    "createdAt",
-    "updatedAt"
+    "source",
+    "file",
+    "approval",
+    "usable",
+    "connected",
+    "env",
+    "headers",
+    "fingerprint"
   ],
-  "description": "One note as stored.",
-  "title": "Note",
-  "$schema": "https://json-schema.org/draft/2020-12/schema"
-}
-```
-
-#### `mcp notes create`
-
-Create a note with a new name.
-
-Creates the note at revision 1. The name must be unused: an existing name fails with CONFLICT and its revision in `details`; change that note with `mcp notes update` instead. Creates the store, with its directory, when it does not exist yet. The receipt reports `status` (`completed`, or `dry-run` when nothing was written), `action` `created`, the `store`, whether the store was created, and the `note` as stored. --dry-run validates the input and checks the name against the store, and creates nothing, not even the store.
-
-- **Effect:** modifies one new note in the store
-- **Requires:** `store`
-- **Dry run:** yes
-- **Idempotent:** no
-- **Errors:** `INVALID_ARGUMENT`, `CONFLICT`, `PRECONDITION_FAILED`, `UNAVAILABLE`, `INTERNAL`
-
-| Argument | Type | Required | Default | Description |
-| --- | --- | --- | --- | --- |
-| `--name <name>` | name: `^[a-z0-9]+(-[a-z0-9]+)*$`, at most 64 characters | yes | — | The new note's name, its permanent identifier |
-| `--title <string>` | string | yes | — | One line, at most 200 characters |
-| `--body <text>` | text | no | empty | The text: the text itself, `@<file>` to read a file, or `-` to read stdin; at most 65536 bytes |
-| `--dry-run` | boolean | no | — | Validate input, resolve the store, and return the receipt the command would produce, without writing anything |
-| `--store <path>` | path | no | — | The note store, a SQLite file; overrides MCP_STORE and the default location. `mcp context show` prints the store in effect |
-
-Examples:
-
-```sh
-# Preview creating a note, writing nothing
-mcp notes create --name packing-list --title 'Packing list' --body 'Passport, charger' --dry-run
-# Create the note
-mcp notes create --name packing-list --title 'Packing list' --body 'Passport, charger'
-```
-
-Result schema:
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "status": {
-      "$ref": "#/$defs/ReceiptStatus"
-    },
-    "action": {
-      "$ref": "#/$defs/Action",
-      "description": "For `dry-run`, what running without --dry-run would do."
-    },
-    "store": {
-      "type": "string",
-      "description": "The store's absolute path."
-    },
-    "storeCreated": {
-      "type": "boolean",
-      "description": "Whether the command created a new store: the file, or its schema, did not exist (for\n`dry-run`: would create it)."
-    },
-    "note": {
-      "$ref": "#/$defs/Note",
-      "description": "The note after the change; for `deleted`, the note as it was."
-    },
-    "changed": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      },
-      "description": "The fields the change sets, such as `title`; empty for `unchanged`."
-    },
-    "previousRevision": {
-      "type": [
-        "integer",
-        "null"
-      ],
-      "format": "int64",
-      "description": "The note's revision before the change; null for `created`."
-    },
-    "caveats": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      },
-      "description": "What a dry run cannot promise about the real run; empty when `completed`."
-    }
-  },
-  "required": [
-    "status",
-    "action",
-    "store",
-    "storeCreated",
-    "note",
-    "changed",
-    "caveats"
-  ],
-  "description": "The outcome of a modifying `notes` command.",
-  "title": "NoteReceipt",
+  "description": "One server in full.",
+  "title": "ServerDetail",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$defs": {
-    "ReceiptStatus": {
+    "Source": {
       "oneOf": [
         {
           "type": "string",
-          "const": "completed",
-          "description": "The change is written."
+          "const": "project",
+          "description": "The nearest `.mcp.json` of the working directory's project."
         },
         {
           "type": "string",
-          "const": "dry-run",
-          "description": "Nothing was written; the receipt shows what running without --dry-run would do."
+          "const": "user",
+          "description": "`$XDG_CONFIG_HOME/.mcp.json`, which applies in every directory."
         }
       ],
-      "description": "Whether a modifying command wrote its change."
+      "description": "Which configuration file a server comes from."
     },
-    "Action": {
+    "TransportKind": {
+      "type": "string",
+      "enum": [
+        "stdio",
+        "http"
+      ],
+      "description": "How `mcp` talks to a server."
+    },
+    "ApprovalState": {
       "oneOf": [
         {
           "type": "string",
-          "enum": [
-            "created",
-            "updated",
-            "deleted"
-          ]
+          "const": "approved",
+          "description": "A person approved this configuration as it is written."
         },
         {
           "type": "string",
-          "const": "unchanged",
-          "description": "The requested values equal the stored ones; nothing was written."
+          "const": "unapproved",
+          "description": "No approval exists for this server in this repository."
+        },
+        {
+          "type": "string",
+          "const": "changed",
+          "description": "A person approved an earlier configuration of this server."
+        },
+        {
+          "type": "string",
+          "const": "not-required",
+          "description": "A user-file server, which never needs approval."
         }
       ],
-      "description": "What the change did to the note."
+      "description": "Whether a server's configuration, as written, has a person's approval."
     },
-    "Note": {
+    "Live": {
       "type": "object",
       "properties": {
-        "name": {
-          "type": "string",
-          "description": "Stable identifier: lowercase letters and digits in hyphen-separated words."
+        "session": {
+          "$ref": "#/$defs/SessionInfo"
         },
-        "title": {
-          "type": "string",
-          "description": "One line."
-        },
-        "body": {
-          "type": "string",
-          "description": "Free text; empty when the note has none."
-        },
-        "revision": {
-          "type": "integer",
-          "format": "int64",
-          "description": "Starts at 1 and increases on every change. Pass it to `--expect-revision` to change\nonly the version you read."
-        },
-        "createdAt": {
-          "type": "string",
-          "description": "When the note was created: RFC 3339, UTC, millisecond precision."
-        },
-        "updatedAt": {
-          "type": "string",
-          "description": "When the note last changed: RFC 3339, UTC, millisecond precision."
+        "server": {
+          "$ref": "#/$defs/ServerDeclaration"
         }
       },
       "required": [
-        "name",
-        "title",
-        "body",
-        "revision",
-        "createdAt",
-        "updatedAt"
+        "session",
+        "server"
+      ]
+    },
+    "SessionInfo": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "workspace": {
+          "type": "string",
+          "description": "The workspace the session belongs to."
+        },
+        "startedAt": {
+          "type": "string",
+          "description": "When the session started, RFC 3339."
+        },
+        "reused": {
+          "type": "boolean",
+          "description": "Whether an earlier command started this session. False means any state from earlier\ncalls, such as a selected browser page, is gone."
+        }
+      },
+      "required": [
+        "id",
+        "workspace",
+        "startedAt",
+        "reused"
       ],
-      "description": "One note as stored."
+      "description": "The session a result used."
+    },
+    "ServerDeclaration": {
+      "type": "object",
+      "properties": {
+        "info": {
+          "description": "The server's `serverInfo` (`name`, `version`, and the rest), when it sent one."
+        },
+        "protocolVersion": {
+          "type": "string"
+        },
+        "capabilities": true,
+        "instructions": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stderr": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The last lines the server wrote to stderr, oldest first; empty for HTTP servers."
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "capabilities",
+        "stderr"
+      ],
+      "description": "What the server declared when the session started."
     }
   }
 }
 ```
 
-#### `mcp notes update`
+#### `mcp servers approve`
 
-Change a note's title or body.
+Ask the person at this machine to approve a project's servers (Touch ID, password).
 
-Sets the given fields and leaves the others as stored; pass at least one of --title and --body. A change increments the note's `revision`; values equal to the stored ones change nothing and report `action` `unchanged`, so repeating an update is safe. Pass --expect-revision with the revision you read to fail with CONFLICT instead of overwriting someone else's change. --dry-run reports the same receipt without writing.
+Asks the person with the system's own authentication (Touch ID, Apple Watch, or the login password on macOS; polkit on Linux) to approve the named project servers, or every one with --all, in one request, then records the approvals in mcp's state directory, bound to this repository and to each server's configuration as written. Always asks, even while approval is not required (MCP_REQUIRE_APPROVAL), so servers can be approved first. An agent cannot approve: a missing or declined answer fails with PERMISSION_DENIED and records nothing. User-file servers return `not-required` and servers already approved `already-approved`, without asking. --dry-run lists what the person would be asked to approve and never asks.
 
-- **Effect:** modifies one existing note in the store
-- **Requires:** `store`
+- **Effect:** modifies approvals
+- **Requires:** `configuration`, `person`
 - **Dry run:** yes
 - **Idempotent:** yes
-- **Errors:** `INVALID_ARGUMENT`, `NOT_FOUND`, `CONFLICT`, `PRECONDITION_FAILED`, `UNAVAILABLE`, `INTERNAL`
+- **Errors:** `INVALID_ARGUMENT`, `NOT_FOUND`, `PRECONDITION_FAILED`, `PERMISSION_DENIED`, `TIMEOUT`, `UNAVAILABLE`, `INTERNAL`
 
 | Argument | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
-| `<name>` | name: `^[a-z0-9]+(-[a-z0-9]+)*$`, at most 64 characters | yes | — | The note's name |
-| `--title <string>` | string | no | — | The new title: one line, at most 200 characters |
-| `--body <text>` | text | no | — | The new text: the text itself, `@<file>` to read a file, or `-` to read stdin; at most 65536 bytes |
-| `--expect-revision <integer>` | integer, at least 1 | no | — | Fail with CONFLICT unless the note is at this revision, so a change never overwrites one you have not read |
-| `--dry-run` | boolean | no | — | Validate input, resolve the store, and return the receipt the command would produce, without writing anything |
-| `--store <path>` | path | no | — | The note store, a SQLite file; overrides MCP_STORE and the default location. `mcp context show` prints the store in effect |
+| `<names>` | string, repeatable | no | — | The servers' names; or pass --all |
+| `--all` | boolean | no | — | Every server instead of the named ones |
+| `--dry-run` | boolean | no | — | Validate the input and resolve the target, and return what the command would do, without changing anything |
+| `--timeout <integer>` | integer, 1–3600 | no | `120` | Seconds to wait for each server, starting its session and answering together |
 
 Examples:
 
 ```sh
-# Preview a new title, writing nothing
-mcp notes update groceries --title 'Groceries for Sunday' --dry-run
-# Retitle the note only if nobody changed it since revision 1
-mcp notes update groceries --title 'Groceries for Sunday' --expect-revision 1
+# Show what approving the server `demo` would ask the person
+mcp servers approve demo --dry-run
 ```
 
 Result schema:
@@ -1210,56 +1382,23 @@ Result schema:
     "status": {
       "$ref": "#/$defs/ReceiptStatus"
     },
-    "action": {
-      "$ref": "#/$defs/Action",
-      "description": "For `dry-run`, what running without --dry-run would do."
-    },
-    "store": {
+    "approvalsFile": {
       "type": "string",
-      "description": "The store's absolute path."
+      "description": "The file the approvals are kept in."
     },
-    "storeCreated": {
-      "type": "boolean",
-      "description": "Whether the command created a new store: the file, or its schema, did not exist (for\n`dry-run`: would create it)."
-    },
-    "note": {
-      "$ref": "#/$defs/Note",
-      "description": "The note after the change; for `deleted`, the note as it was."
-    },
-    "changed": {
+    "items": {
       "type": "array",
       "items": {
-        "type": "string"
-      },
-      "description": "The fields the change sets, such as `title`; empty for `unchanged`."
-    },
-    "previousRevision": {
-      "type": [
-        "integer",
-        "null"
-      ],
-      "format": "int64",
-      "description": "The note's revision before the change; null for `created`."
-    },
-    "caveats": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      },
-      "description": "What a dry run cannot promise about the real run; empty when `completed`."
+        "$ref": "#/$defs/ApprovalItem"
+      }
     }
   },
   "required": [
     "status",
-    "action",
-    "store",
-    "storeCreated",
-    "note",
-    "changed",
-    "caveats"
+    "approvalsFile",
+    "items"
   ],
-  "description": "The outcome of a modifying `notes` command.",
-  "title": "NoteReceipt",
+  "title": "ApprovalReceipt",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$defs": {
     "ReceiptStatus": {
@@ -1267,103 +1406,95 @@ Result schema:
         {
           "type": "string",
           "const": "completed",
-          "description": "The change is written."
+          "description": "The change was made."
         },
         {
           "type": "string",
           "const": "dry-run",
-          "description": "Nothing was written; the receipt shows what running without --dry-run would do."
+          "description": "Nothing changed; the receipt shows what would have happened."
         }
       ],
-      "description": "Whether a modifying command wrote its change."
+      "description": "Whether a command changed anything."
     },
-    "Action": {
-      "oneOf": [
-        {
-          "type": "string",
-          "enum": [
-            "created",
-            "updated",
-            "deleted"
-          ]
-        },
-        {
-          "type": "string",
-          "const": "unchanged",
-          "description": "The requested values equal the stored ones; nothing was written."
-        }
-      ],
-      "description": "What the change did to the note."
-    },
-    "Note": {
+    "ApprovalItem": {
       "type": "object",
       "properties": {
-        "name": {
-          "type": "string",
-          "description": "Stable identifier: lowercase letters and digits in hyphen-separated words."
+        "server": {
+          "type": "string"
         },
-        "title": {
-          "type": "string",
-          "description": "One line."
+        "file": {
+          "type": "string"
         },
-        "body": {
-          "type": "string",
-          "description": "Free text; empty when the note has none."
+        "outcome": {
+          "$ref": "#/$defs/ApprovalOutcome"
         },
-        "revision": {
-          "type": "integer",
-          "format": "int64",
-          "description": "Starts at 1 and increases on every change. Pass it to `--expect-revision` to change\nonly the version you read."
-        },
-        "createdAt": {
+        "fingerprint": {
           "type": "string",
-          "description": "When the note was created: RFC 3339, UTC, millisecond precision."
+          "description": "The configuration approved: what a later change is compared with."
         },
-        "updatedAt": {
-          "type": "string",
-          "description": "When the note last changed: RFC 3339, UTC, millisecond precision."
+        "target": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The command line or URL as written."
         }
       },
       "required": [
-        "name",
-        "title",
-        "body",
-        "revision",
-        "createdAt",
-        "updatedAt"
-      ],
-      "description": "One note as stored."
+        "server",
+        "file",
+        "outcome",
+        "fingerprint"
+      ]
+    },
+    "ApprovalOutcome": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "approved",
+          "description": "The person approved it (with `dry-run`: the person would be asked)."
+        },
+        {
+          "type": "string",
+          "const": "already-approved",
+          "description": "This configuration was already approved; nothing was asked."
+        },
+        {
+          "type": "string",
+          "const": "not-required",
+          "description": "A user-file server, which never needs approval."
+        }
+      ]
     }
   }
 }
 ```
 
-#### `mcp notes delete`
+#### `mcp servers revoke`
 
-Delete a note permanently.
+Remove the approvals of a project's servers.
 
-Removes the note; the receipt carries the note as it was, which is the only copy left. Pass --expect-revision with the revision you read to fail with CONFLICT instead of deleting a note someone changed. Deleting a missing note fails with NOT_FOUND. --dry-run reports the same receipt without deleting.
+Removes every approval of the named project servers, or of every server with --all, in this repository. Needs no confirmation. While approval is required (MCP_REQUIRE_APPROVAL=1), also ends the servers' sessions in this workspace. --dry-run reports what would be revoked without changing anything.
 
-- **Effect:** modifies one existing note in the store, permanently
-- **Requires:** `store`
+- **Effect:** modifies approvals
+- **Requires:** `configuration`
 - **Dry run:** yes
-- **Idempotent:** no
-- **Errors:** `INVALID_ARGUMENT`, `NOT_FOUND`, `CONFLICT`, `PRECONDITION_FAILED`, `UNAVAILABLE`, `INTERNAL`
+- **Idempotent:** yes
+- **Errors:** `INVALID_ARGUMENT`, `NOT_FOUND`, `PRECONDITION_FAILED`, `UNAVAILABLE`, `INTERNAL`
 
 | Argument | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
-| `<name>` | name: `^[a-z0-9]+(-[a-z0-9]+)*$`, at most 64 characters | yes | — | The note's name |
-| `--expect-revision <integer>` | integer, at least 1 | no | — | Fail with CONFLICT unless the note is at this revision, so a change never overwrites one you have not read |
-| `--dry-run` | boolean | no | — | Validate input, resolve the store, and return the receipt the command would produce, without writing anything |
-| `--store <path>` | path | no | — | The note store, a SQLite file; overrides MCP_STORE and the default location. `mcp context show` prints the store in effect |
+| `<names>` | string, repeatable | no | — | The servers' names; or pass --all |
+| `--all` | boolean | no | — | Every server instead of the named ones |
+| `--dry-run` | boolean | no | — | Validate the input and resolve the target, and return what the command would do, without changing anything |
 
 Examples:
 
 ```sh
-# Preview deleting a note
-mcp notes delete standup --dry-run
-# Delete the note only if it is still at revision 1
-mcp notes delete standup --expect-revision 1
+# Preview revoking every approval
+mcp servers revoke --all --dry-run
+# Revoke the server `demo`
+mcp servers revoke demo
 ```
 
 Result schema:
@@ -1375,56 +1506,22 @@ Result schema:
     "status": {
       "$ref": "#/$defs/ReceiptStatus"
     },
-    "action": {
-      "$ref": "#/$defs/Action",
-      "description": "For `dry-run`, what running without --dry-run would do."
+    "approvalsFile": {
+      "type": "string"
     },
-    "store": {
-      "type": "string",
-      "description": "The store's absolute path."
-    },
-    "storeCreated": {
-      "type": "boolean",
-      "description": "Whether the command created a new store: the file, or its schema, did not exist (for\n`dry-run`: would create it)."
-    },
-    "note": {
-      "$ref": "#/$defs/Note",
-      "description": "The note after the change; for `deleted`, the note as it was."
-    },
-    "changed": {
+    "items": {
       "type": "array",
       "items": {
-        "type": "string"
-      },
-      "description": "The fields the change sets, such as `title`; empty for `unchanged`."
-    },
-    "previousRevision": {
-      "type": [
-        "integer",
-        "null"
-      ],
-      "format": "int64",
-      "description": "The note's revision before the change; null for `created`."
-    },
-    "caveats": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      },
-      "description": "What a dry run cannot promise about the real run; empty when `completed`."
+        "$ref": "#/$defs/RevocationItem"
+      }
     }
   },
   "required": [
     "status",
-    "action",
-    "store",
-    "storeCreated",
-    "note",
-    "changed",
-    "caveats"
+    "approvalsFile",
+    "items"
   ],
-  "description": "The outcome of a modifying `notes` command.",
-  "title": "NoteReceipt",
+  "title": "RevocationReceipt",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$defs": {
     "ReceiptStatus": {
@@ -1432,103 +1529,73 @@ Result schema:
         {
           "type": "string",
           "const": "completed",
-          "description": "The change is written."
+          "description": "The change was made."
         },
         {
           "type": "string",
           "const": "dry-run",
-          "description": "Nothing was written; the receipt shows what running without --dry-run would do."
+          "description": "Nothing changed; the receipt shows what would have happened."
         }
       ],
-      "description": "Whether a modifying command wrote its change."
+      "description": "Whether a command changed anything."
     },
-    "Action": {
-      "oneOf": [
-        {
-          "type": "string",
-          "enum": [
-            "created",
-            "updated",
-            "deleted"
-          ]
-        },
-        {
-          "type": "string",
-          "const": "unchanged",
-          "description": "The requested values equal the stored ones; nothing was written."
-        }
-      ],
-      "description": "What the change did to the note."
-    },
-    "Note": {
+    "RevocationItem": {
       "type": "object",
       "properties": {
-        "name": {
-          "type": "string",
-          "description": "Stable identifier: lowercase letters and digits in hyphen-separated words."
+        "server": {
+          "type": "string"
         },
-        "title": {
-          "type": "string",
-          "description": "One line."
+        "outcome": {
+          "$ref": "#/$defs/RevocationOutcome",
+          "description": "`revoked`, or `not-approved` when no approval existed."
         },
-        "body": {
-          "type": "string",
-          "description": "Free text; empty when the note has none."
-        },
-        "revision": {
-          "type": "integer",
-          "format": "int64",
-          "description": "Starts at 1 and increases on every change. Pass it to `--expect-revision` to change\nonly the version you read."
-        },
-        "createdAt": {
-          "type": "string",
-          "description": "When the note was created: RFC 3339, UTC, millisecond precision."
-        },
-        "updatedAt": {
-          "type": "string",
-          "description": "When the note last changed: RFC 3339, UTC, millisecond precision."
+        "disconnected": {
+          "type": "boolean",
+          "description": "Whether its session in this workspace ended."
         }
       },
       "required": [
-        "name",
-        "title",
-        "body",
-        "revision",
-        "createdAt",
-        "updatedAt"
-      ],
-      "description": "One note as stored."
+        "server",
+        "outcome",
+        "disconnected"
+      ]
+    },
+    "RevocationOutcome": {
+      "type": "string",
+      "enum": [
+        "revoked",
+        "not-approved"
+      ]
     }
   }
 }
 ```
 
-### `store`
+#### `mcp servers disconnect`
 
-Prepare and upgrade the note store.
+End server sessions in this workspace; the next command starts a fresh one.
 
-#### `mcp store migrate`
+Ends the sessions of the named servers, or of every server with --all, in this workspace: a stdio server's process is shut down (its stdin closed, then SIGTERM, then SIGKILL). The next command that needs the server starts a new session, without any state the old one held. Never starts the session daemon; with no daemon running, every server is `not-connected`. Works even while a configuration file is invalid.
 
-Create the store or upgrade its schema to this mcp's version.
-
-Applies every schema migration the store lacks, oldest first, under the store's write lock, creating the store and its directory when they do not exist. Other commands refuse a store with pending migrations (PRECONDITION_FAILED), so run this after upgrading mcp when they ask for it. The receipt lists the `migrations` applied; an empty list means the store was already current, so running it again is safe. A store written by a newer mcp, or a SQLite database another program wrote, is refused and left unchanged. --dry-run lists the migrations it would apply and changes nothing.
-
-- **Effect:** modifies the store's schema
-- **Requires:** `store`
+- **Effect:** modifies sessions
+- **Requires:** `servers`
 - **Dry run:** yes
 - **Idempotent:** yes
 - **Errors:** `INVALID_ARGUMENT`, `PRECONDITION_FAILED`, `UNAVAILABLE`, `INTERNAL`
 
 | Argument | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
-| `--dry-run` | boolean | no | — | Validate input, resolve the store, and return the receipt the command would produce, without writing anything |
-| `--store <path>` | path | no | — | The note store, a SQLite file; overrides MCP_STORE and the default location. `mcp context show` prints the store in effect |
+| `<names>` | string, repeatable | no | — | The servers' names; or pass --all |
+| `--all` | boolean | no | — | Every server instead of the named ones |
+| `--dry-run` | boolean | no | — | Validate the input and resolve the target, and return what the command would do, without changing anything |
 
 Examples:
 
 ```sh
-# Show the migrations the store needs, changing nothing
-mcp store migrate --dry-run
+# Preview ending every session in this workspace
+mcp servers disconnect --all --dry-run
+# End the server `demo`'s session
+mcp servers disconnect demo
 ```
 
 Result schema:
@@ -1540,30 +1607,22 @@ Result schema:
     "status": {
       "$ref": "#/$defs/ReceiptStatus"
     },
-    "store": {
-      "type": "string",
-      "description": "The store's absolute path."
+    "workspace": {
+      "type": "string"
     },
-    "storeCreated": {
-      "type": "boolean",
-      "description": "Whether the command created a new store: the file, or its schema, did not exist (for\n`dry-run`: would create it)."
-    },
-    "migrations": {
+    "items": {
       "type": "array",
       "items": {
-        "type": "string"
-      },
-      "description": "The migrations applied (for `dry-run`: that would be applied), oldest first; empty when\nthe store was current."
+        "$ref": "#/$defs/DisconnectItem"
+      }
     }
   },
   "required": [
     "status",
-    "store",
-    "storeCreated",
-    "migrations"
+    "workspace",
+    "items"
   ],
-  "description": "The outcome of `mcp store migrate`.",
-  "title": "MigrationReceipt",
+  "title": "DisconnectReceipt",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$defs": {
     "ReceiptStatus": {
@@ -1571,15 +1630,750 @@ Result schema:
         {
           "type": "string",
           "const": "completed",
-          "description": "The change is written."
+          "description": "The change was made."
         },
         {
           "type": "string",
           "const": "dry-run",
-          "description": "Nothing was written; the receipt shows what running without --dry-run would do."
+          "description": "Nothing changed; the receipt shows what would have happened."
         }
       ],
-      "description": "Whether a modifying command wrote its change."
+      "description": "Whether a command changed anything."
+    },
+    "DisconnectItem": {
+      "type": "object",
+      "properties": {
+        "server": {
+          "type": "string"
+        },
+        "outcome": {
+          "$ref": "#/$defs/DisconnectOutcome"
+        }
+      },
+      "required": [
+        "server",
+        "outcome"
+      ]
+    },
+    "DisconnectOutcome": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "disconnected",
+          "description": "Its session ended (with `dry-run`: would end)."
+        },
+        {
+          "type": "string",
+          "const": "not-connected",
+          "description": "It had no session in this workspace."
+        }
+      ]
+    }
+  }
+}
+```
+
+### `tools`
+
+List, search, and inspect the tools servers offer.
+
+#### `mcp tools list`
+
+List the tools every usable server offers, one line each.
+
+Starts or reuses each server's session and pages through its tools, in server-name order and then each server's own order. Each item has the server, the tool's name and title, a one-line summary (at most 200 characters; `summaryTruncated` says when it was cut), and the annotations the server declared. Servers that cannot answer (unusable, unapproved, failing to start, timing out) do not fail the command: `complete` is false and `unavailable` lists each with its error code and message. Pass --server to ask only some servers.
+
+- **Effect:** modifies starts or reuses server sessions; never calls a tool
+- **Requires:** `configuration`, `servers`
+- **Dry run:** no
+- **Idempotent:** yes
+- **Errors:** `INVALID_ARGUMENT`, `NOT_FOUND`, `PRECONDITION_FAILED`, `INTERNAL`
+
+| Argument | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `--server <string>` | string, repeatable | no | — | Ask only this server; repeat for several. Default: every configured server |
+| `--limit <integer>` | integer, 1–200 | no | `50` | The most tools to return |
+| `--cursor <string>` | string | no | — | Resume after a previous page: the nextCursor it returned |
+| `--timeout <integer>` | integer, 1–3600 | no | `120` | Seconds to wait for each server, starting its session and answering together |
+
+Examples:
+
+```sh
+# List every server's tools
+mcp tools list
+# List one server's tools, five at a time
+mcp tools list --server demo --limit 5
+```
+
+Result schema:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ToolSummary"
+      }
+    },
+    "hasMore": {
+      "type": "boolean",
+      "description": "Whether more items follow this page."
+    },
+    "nextCursor": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Pass as `--cursor` to get the next page; null when there is none."
+    },
+    "complete": {
+      "type": "boolean",
+      "description": "Whether every server answered."
+    },
+    "unavailable": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Unavailable"
+      }
+    }
+  },
+  "required": [
+    "items",
+    "hasMore",
+    "complete",
+    "unavailable"
+  ],
+  "description": "One page of a collection.",
+  "title": "ToolPage",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "ToolSummary": {
+      "type": "object",
+      "properties": {
+        "server": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "summary": {
+          "type": "string",
+          "description": "The description's first line, at most 200 characters."
+        },
+        "summaryTruncated": {
+          "type": "boolean"
+        },
+        "annotations": {
+          "description": "The server's own hints, such as readOnlyHint; unverified."
+        }
+      },
+      "required": [
+        "server",
+        "name",
+        "summary",
+        "summaryTruncated"
+      ]
+    },
+    "Unavailable": {
+      "type": "object",
+      "properties": {
+        "server": {
+          "type": "string"
+        },
+        "code": {
+          "$ref": "#/$defs/ErrorCode",
+          "description": "The error code asking it alone would have reported."
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "server",
+        "code",
+        "message"
+      ],
+      "description": "A server that could not answer."
+    },
+    "ErrorCode": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "INVALID_ARGUMENT",
+          "description": "Input is missing or malformed."
+        },
+        {
+          "type": "string",
+          "const": "NOT_FOUND",
+          "description": "A named server, tool, command, or document does not exist."
+        },
+        {
+          "type": "string",
+          "const": "PRECONDITION_FAILED",
+          "description": "The configuration, the server, or its approval is not ready for the operation."
+        },
+        {
+          "type": "string",
+          "const": "PERMISSION_DENIED",
+          "description": "The person declined approval or could not be asked."
+        },
+        {
+          "type": "string",
+          "const": "UNAUTHENTICATED",
+          "description": "An HTTP server refused the request's credentials."
+        },
+        {
+          "type": "string",
+          "const": "UNAVAILABLE",
+          "description": "A server or the daemon could not be reached; retrying can succeed."
+        },
+        {
+          "type": "string",
+          "const": "TIMEOUT",
+          "description": "No answer within `--timeout`."
+        },
+        {
+          "type": "string",
+          "const": "TOOL_ERROR",
+          "description": "The tool ran and reported an error."
+        },
+        {
+          "type": "string",
+          "const": "SERVER_ERROR",
+          "description": "The server answered with a protocol error."
+        },
+        {
+          "type": "string",
+          "const": "INTERNAL",
+          "description": "A defect in `mcp` itself, or a stdout that cannot take the result."
+        }
+      ],
+      "description": "A stable error code. Codes, exit statuses, and retryability are part of the CLI contract."
+    }
+  }
+}
+```
+
+#### `mcp tools search`
+
+Find the tools that fit a task described in plain words, across servers.
+
+Ranks every usable server's tools against the query by their names, titles, descriptions, and parameters, locally, and returns the best matches, each with the exact `mcp tools info` command to inspect it. Starts or reuses sessions as `tools list` does, and reports servers that could not answer under `unavailable`.
+
+- **Effect:** modifies starts or reuses server sessions; never calls a tool
+- **Requires:** `configuration`, `servers`
+- **Dry run:** no
+- **Idempotent:** yes
+- **Errors:** `INVALID_ARGUMENT`, `NOT_FOUND`, `PRECONDITION_FAILED`, `INTERNAL`
+
+| Argument | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `<query>` | string, repeatable | yes | — | What you want to do, in plain words; several words need no quotes |
+| `--server <string>` | string, repeatable | no | — | Ask only this server; repeat for several. Default: every configured server |
+| `--limit <integer>` | integer, 1–50 | no | `10` | The most matches to return |
+| `--timeout <integer>` | integer, 1–3600 | no | `120` | Seconds to wait for each server, starting its session and answering together |
+
+Examples:
+
+```sh
+# Find a tool that echoes text
+mcp tools search 'echo some text'
+```
+
+Result schema:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ToolMatch"
+      }
+    },
+    "hasMore": {
+      "type": "boolean",
+      "description": "Whether more tools matched than `--limit` allowed."
+    },
+    "complete": {
+      "type": "boolean"
+    },
+    "unavailable": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Unavailable"
+      }
+    }
+  },
+  "required": [
+    "items",
+    "hasMore",
+    "complete",
+    "unavailable"
+  ],
+  "title": "ToolMatches",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "ToolMatch": {
+      "type": "object",
+      "properties": {
+        "server": {
+          "type": "string"
+        },
+        "tool": {
+          "type": "string"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "score": {
+          "type": "number",
+          "format": "double",
+          "description": "Relevance from 0 to 1."
+        },
+        "command": {
+          "type": "string",
+          "description": "The command that shows the tool's full contract."
+        }
+      },
+      "required": [
+        "server",
+        "tool",
+        "summary",
+        "score",
+        "command"
+      ]
+    },
+    "Unavailable": {
+      "type": "object",
+      "properties": {
+        "server": {
+          "type": "string"
+        },
+        "code": {
+          "$ref": "#/$defs/ErrorCode",
+          "description": "The error code asking it alone would have reported."
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "server",
+        "code",
+        "message"
+      ],
+      "description": "A server that could not answer."
+    },
+    "ErrorCode": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "INVALID_ARGUMENT",
+          "description": "Input is missing or malformed."
+        },
+        {
+          "type": "string",
+          "const": "NOT_FOUND",
+          "description": "A named server, tool, command, or document does not exist."
+        },
+        {
+          "type": "string",
+          "const": "PRECONDITION_FAILED",
+          "description": "The configuration, the server, or its approval is not ready for the operation."
+        },
+        {
+          "type": "string",
+          "const": "PERMISSION_DENIED",
+          "description": "The person declined approval or could not be asked."
+        },
+        {
+          "type": "string",
+          "const": "UNAUTHENTICATED",
+          "description": "An HTTP server refused the request's credentials."
+        },
+        {
+          "type": "string",
+          "const": "UNAVAILABLE",
+          "description": "A server or the daemon could not be reached; retrying can succeed."
+        },
+        {
+          "type": "string",
+          "const": "TIMEOUT",
+          "description": "No answer within `--timeout`."
+        },
+        {
+          "type": "string",
+          "const": "TOOL_ERROR",
+          "description": "The tool ran and reported an error."
+        },
+        {
+          "type": "string",
+          "const": "SERVER_ERROR",
+          "description": "The server answered with a protocol error."
+        },
+        {
+          "type": "string",
+          "const": "INTERNAL",
+          "description": "A defect in `mcp` itself, or a stdout that cannot take the result."
+        }
+      ],
+      "description": "A stable error code. Codes, exit statuses, and retryability are part of the CLI contract."
+    }
+  }
+}
+```
+
+#### `mcp tools info`
+
+Show a tool's description, input and output schemas, annotations, and flags.
+
+Returns the tool exactly as the server declared it (`description`, `inputSchema`, `outputSchema`, `annotations`; annotations such as readOnlyHint are the server's own unverified hints), the `flags` `mcp call` accepts for its input properties, and an example `mcp call` command line.
+
+- **Effect:** modifies starts or reuses server sessions; never calls a tool
+- **Requires:** `configuration`, `servers`
+- **Dry run:** no
+- **Idempotent:** yes
+- **Errors:** `INVALID_ARGUMENT`, `NOT_FOUND`, `PRECONDITION_FAILED`, `UNAUTHENTICATED`, `UNAVAILABLE`, `TIMEOUT`, `INTERNAL`
+
+| Argument | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `<server>` | string | yes | — | The server that offers the tool |
+| `<tool>` | string | yes | — | The tool's name, as `mcp tools list` shows it |
+| `--timeout <integer>` | integer, 1–3600 | no | `120` | Seconds to wait for each server, starting its session and answering together |
+
+Examples:
+
+```sh
+# Inspect the `echo` tool of the server `demo`
+mcp tools info demo echo
+```
+
+Result schema:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "server": {
+      "type": "string"
+    },
+    "session": {
+      "$ref": "#/$defs/SessionInfo"
+    },
+    "tool": {
+      "description": "The tool exactly as the server declared it. Its annotations are the server's own\nunverified hints."
+    },
+    "flags": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ToolFlag"
+      },
+      "description": "The flags `mcp call` accepts for the tool's input properties."
+    },
+    "example": {
+      "type": "string",
+      "description": "An `mcp call` command line with every required flag."
+    }
+  },
+  "required": [
+    "server",
+    "session",
+    "tool",
+    "flags",
+    "example"
+  ],
+  "title": "ToolInfo",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "SessionInfo": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "workspace": {
+          "type": "string",
+          "description": "The workspace the session belongs to."
+        },
+        "startedAt": {
+          "type": "string",
+          "description": "When the session started, RFC 3339."
+        },
+        "reused": {
+          "type": "boolean",
+          "description": "Whether an earlier command started this session. False means any state from earlier\ncalls, such as a selected browser page, is gone."
+        }
+      },
+      "required": [
+        "id",
+        "workspace",
+        "startedAt",
+        "reused"
+      ],
+      "description": "The session a result used."
+    },
+    "ToolFlag": {
+      "type": "object",
+      "properties": {
+        "flag": {
+          "type": "string",
+          "description": "How to write it: the property name in kebab-case, or as written when two properties\nshare a kebab-case spelling."
+        },
+        "property": {
+          "type": "string",
+          "description": "The property name in the tool's inputSchema; `--<property>` is always accepted too."
+        },
+        "type": {
+          "$ref": "#/$defs/FlagType"
+        },
+        "itemType": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FlagType"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How each item of an `array` flag is converted; null otherwise."
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "acceptedValues": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": true,
+          "description": "The values the property's `enum` accepts; null when it has none."
+        }
+      },
+      "required": [
+        "flag",
+        "property",
+        "type",
+        "required"
+      ],
+      "description": "One input property, as a flag."
+    },
+    "FlagType": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "string",
+          "description": "The text unchanged."
+        },
+        {
+          "type": "string",
+          "const": "integer",
+          "description": "A JSON number."
+        },
+        {
+          "type": "string",
+          "const": "number",
+          "description": "A JSON number."
+        },
+        {
+          "type": "string",
+          "const": "boolean",
+          "description": "Alone, `true`; or an explicit `true` or `false`."
+        },
+        {
+          "type": "string",
+          "const": "array",
+          "description": "Each occurrence adds one item, converted by `itemType`."
+        },
+        {
+          "type": "string",
+          "const": "json",
+          "description": "JSON text."
+        }
+      ],
+      "description": "How a flag's text becomes a JSON value."
+    }
+  }
+}
+```
+
+### `call`
+
+Call a server's tool.
+
+#### `mcp call`
+
+Call a server's tool with its input properties as flags, and print its result.
+
+Starts or reuses the server's session, reads the tool's inputSchema, builds the input from --input (default `{}`) with each flag after the tool setting one property (`--file-path x` or `--filePath x` for `filePath`), checks it against the schema, and calls the tool. mcp's own options go before the server: every word after the tool belongs to the tool. The result is the server's CallToolResult unchanged, with the session that answered; `--output text` prints its text content. A tool that reports an error (isError) fails with TOOL_ERROR and its whole result in `details.result`. --dry-run checks the input and shows what would be sent without calling the tool; the tool's own validation and effects stay unknown until it runs. `--help` after the tool prints its flags.
+
+- **Effect:** modifies a server's tool, whose effects belong to the server
+- **Requires:** `configuration`, `servers`
+- **Dry run:** yes
+- **Idempotent:** no
+- **Errors:** `INVALID_ARGUMENT`, `NOT_FOUND`, `PRECONDITION_FAILED`, `UNAUTHENTICATED`, `UNAVAILABLE`, `TIMEOUT`, `TOOL_ERROR`, `SERVER_ERROR`, `INTERNAL`
+
+| Argument | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `--input <text>` | text | no | — | The tool's input as a JSON object, `@<file>`, or `-` for stdin; flags after the tool set or replace its properties |
+| `--dry-run` | boolean | no | — | Validate the input and resolve the target, and return what the command would do, without changing anything |
+| `--timeout <integer>` | integer, 1–3600 | no | `120` | Seconds to wait for each server, starting its session and answering together |
+| `<server>` | string | yes | — | The server that offers the tool |
+| `<tool>` | string | yes | — | The tool's name, as `mcp tools list` shows it |
+| `[--<property> <value>]...` | string, repeatable | no | — | The tool's input properties as flags, such as `--url https://example.com`; `mcp tools info <server> <tool>` lists them, and `--help` here prints them |
+
+Examples:
+
+```sh
+# Call `echo` on the server `demo` with a text property
+mcp call demo echo --text hello
+# Check the input and show what would be sent, without calling the tool
+mcp call --dry-run demo echo --text hello --count 2
+# Pass the input as JSON
+mcp call --input '{"text":"hello"}' demo echo
+```
+
+Result schema:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "status": {
+      "$ref": "#/$defs/ReceiptStatus",
+      "description": "`completed`, or `dry-run` when the tool was not called."
+    },
+    "server": {
+      "type": "string"
+    },
+    "tool": {
+      "type": "string"
+    },
+    "session": {
+      "$ref": "#/$defs/SessionInfo"
+    },
+    "inputValidation": {
+      "$ref": "#/$defs/InputValidation"
+    },
+    "arguments": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true,
+      "description": "The input that would be sent; present only for `dry-run`."
+    },
+    "result": {
+      "description": "The server's CallToolResult, unchanged: `content`, `structuredContent`, `isError`. Null\nfor `dry-run`."
+    },
+    "caveats": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "What a dry run cannot tell."
+    }
+  },
+  "required": [
+    "status",
+    "server",
+    "tool",
+    "session",
+    "inputValidation",
+    "caveats"
+  ],
+  "title": "CallResult",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "ReceiptStatus": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "completed",
+          "description": "The change was made."
+        },
+        {
+          "type": "string",
+          "const": "dry-run",
+          "description": "Nothing changed; the receipt shows what would have happened."
+        }
+      ],
+      "description": "Whether a command changed anything."
+    },
+    "SessionInfo": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "workspace": {
+          "type": "string",
+          "description": "The workspace the session belongs to."
+        },
+        "startedAt": {
+          "type": "string",
+          "description": "When the session started, RFC 3339."
+        },
+        "reused": {
+          "type": "boolean",
+          "description": "Whether an earlier command started this session. False means any state from earlier\ncalls, such as a selected browser page, is gone."
+        }
+      },
+      "required": [
+        "id",
+        "workspace",
+        "startedAt",
+        "reused"
+      ],
+      "description": "The session a result used."
+    },
+    "InputValidation": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "$ref": "#/$defs/ValidationStatus",
+          "description": "`passed`, or `skipped` when mcp could not compile the tool's inputSchema and sent the\ninput unchecked."
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Why validation was skipped; null when it passed."
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "description": "Whether `mcp` checked the input before sending it."
+    },
+    "ValidationStatus": {
+      "type": "string",
+      "enum": [
+        "passed",
+        "skipped"
+      ]
     }
   }
 }

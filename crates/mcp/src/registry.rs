@@ -47,19 +47,29 @@ pub struct CommandSpec {
 pub enum Effect {
     Reads,
     Modifies(&'static str),
+    /// Starts or reuses server sessions, and asks servers what they offer; never calls a tool.
+    Connects,
+    /// Calls a server's tool, whose effects belong to the server.
+    Calls,
 }
 
 /// What an operation needs at run time beyond `mcp` itself.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Requirement {
-    /// The note store that `--store`, `MCP_STORE`, or the default location selects.
-    Store,
+    /// The user's and the project's `.mcp.json`, which `mcp context show` reports.
+    Configuration,
+    /// The configured servers themselves, reached through the session daemon.
+    Servers,
+    /// A person at the machine, who confirms with the system's authentication.
+    Person,
 }
 
 impl Requirement {
     pub fn as_str(self) -> &'static str {
         match self {
-            Requirement::Store => "store",
+            Requirement::Configuration => "configuration",
+            Requirement::Servers => "servers",
+            Requirement::Person => "person",
         }
     }
 }
@@ -82,6 +92,8 @@ pub enum ArgumentKind {
     Positional,
     Option,
     Flag,
+    /// Every word after the positionals, flags included, passed through unparsed.
+    Trailing,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -93,19 +105,11 @@ pub enum ValueKind {
         min: u64,
         max: Option<u64>,
     },
-    /// A note name: see [`NAME_PATTERN`].
-    Name,
     /// Free text, `@<path>` to read a file, or `-` to read stdin.
     Text,
     Choice(&'static [&'static str]),
     Boolean,
 }
-
-/// What a note name looks like: lowercase letters and digits in hyphen-separated words.
-pub const NAME_PATTERN: &str = "^[a-z0-9]+(-[a-z0-9]+)*$";
-
-/// The longest note name, in characters.
-pub const NAME_MAX_LENGTH: usize = 64;
 
 impl ValueKind {
     pub fn type_name(self) -> &'static str {
@@ -113,7 +117,6 @@ impl ValueKind {
             ValueKind::String => "string",
             ValueKind::Path => "path",
             ValueKind::Integer { .. } => "integer",
-            ValueKind::Name => "name",
             ValueKind::Text => "text",
             ValueKind::Choice(_) => "choice",
             ValueKind::Boolean => "boolean",
@@ -153,20 +156,41 @@ pub const DRY_RUN: ArgumentSpec = ArgumentSpec {
     required: false,
     default: None,
     multiple: false,
-    summary: "Validate input, resolve the store, and return the receipt the command would produce, \
-              without writing anything",
+    summary: "Validate the input and resolve the target, and return what the command would do, \
+              without changing anything",
 };
 
-/// The `--store` option every command that touches the store declares.
-pub const STORE: ArgumentSpec = ArgumentSpec {
-    name: "store",
+/// `--timeout` on every command that contacts a server.
+pub const TIMEOUT: ArgumentSpec = ArgumentSpec {
+    name: "timeout",
     kind: ArgumentKind::Option,
-    value: ValueKind::Path,
+    value: ValueKind::Integer { min: 1, max: Some(3600) },
+    required: false,
+    default: Some("120"),
+    multiple: false,
+    summary: "Seconds to wait for each server, starting its session and answering together",
+};
+
+/// `--server` on the commands that ask several servers.
+pub const SERVER_FILTER: ArgumentSpec = ArgumentSpec {
+    name: "server",
+    kind: ArgumentKind::Option,
+    value: ValueKind::String,
+    required: false,
+    default: None,
+    multiple: true,
+    summary: "Ask only this server; repeat for several. Default: every configured server",
+};
+
+/// `--all` on the commands that act on several named servers.
+pub const ALL_SERVERS: ArgumentSpec = ArgumentSpec {
+    name: "all",
+    kind: ArgumentKind::Flag,
+    value: ValueKind::Boolean,
     required: false,
     default: None,
     multiple: false,
-    summary: "The note store, a SQLite file; overrides MCP_STORE and the default location. \
-              `mcp context show` prints the store in effect",
+    summary: "Every server instead of the named ones",
 };
 
 /// The resource groups, in the order `--help` lists them, with a summary of each.
@@ -174,9 +198,10 @@ pub const RESOURCES: &[(&str, &str)] = &[
     ("cli", "Find the command for a task"),
     ("schema", "Inspect a command's full specification"),
     ("docs", "Search and read mcp's documentation"),
-    ("context", "Show where commands take effect"),
-    ("notes", "Create, read, update, and delete notes"),
-    ("store", "Prepare and upgrade the note store"),
+    ("context", "Show the configuration, workspace, approvals, and daemon in effect"),
+    ("servers", "List, inspect, approve, and disconnect configured MCP servers"),
+    ("tools", "List, search, and inspect the tools servers offer"),
+    ("call", "Call a server's tool"),
 ];
 
 /// Every command, in the order discovery lists them.
@@ -197,6 +222,8 @@ impl CommandSpec {
         match self.effect {
             Effect::Reads => "reads".to_string(),
             Effect::Modifies(what) => format!("modifies {what}"),
+            Effect::Connects => "connects to servers".to_string(),
+            Effect::Calls => "calls a tool; its effects belong to the server".to_string(),
         }
     }
 
@@ -229,6 +256,14 @@ impl CommandSpec {
                 Effect::Modifies(what) => {
                     EffectDescription { kind: "modifies".into(), what: Some(what.to_string()) }
                 }
+                Effect::Connects => EffectDescription {
+                    kind: "connects".into(),
+                    what: Some("starts or reuses server sessions; never calls a tool".into()),
+                },
+                Effect::Calls => EffectDescription {
+                    kind: "calls".into(),
+                    what: Some("a server's tool, whose effects belong to the server".into()),
+                },
             },
             requires: self
                 .requires
@@ -264,8 +299,9 @@ pub struct CommandDescription {
     /// The command's own arguments, then the options every command accepts.
     pub arguments: Vec<ArgumentDescription>,
     pub effect: EffectDescription,
-    /// What the command needs besides mcp: `store` is the note store `mcp context show`
-    /// reports.
+    /// What the command needs besides mcp: `configuration` (the `.mcp.json` files `mcp
+    /// context show` reports), `servers` (the configured servers, through the session daemon),
+    /// or `person` (someone at the machine to confirm).
     pub requires: Vec<String>,
     /// Whether the command accepts `--dry-run`.
     pub dry_run: bool,
@@ -280,9 +316,10 @@ pub struct CommandDescription {
 
 #[derive(Serialize, JsonSchema)]
 pub struct EffectDescription {
-    /// `reads` or `modifies`.
+    /// `reads`, `modifies`, `connects` (starts or reuses server sessions), or `calls` (a
+    /// server's tool).
     pub kind: String,
-    /// What a modifying command changes.
+    /// What the command changes, connects to, or calls.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub what: Option<String>,
 }
@@ -307,12 +344,13 @@ pub struct ExampleDescription {
 #[serde(rename_all = "camelCase")]
 pub struct ArgumentDescription {
     pub name: String,
-    /// `positional`, `option`, or `flag`.
+    /// `positional`, `option`, `flag`, or `trailing` (every word after the positionals, passed
+    /// through to the tool).
     pub kind: String,
-    /// How to write it: `<name>`, `--limit <integer>`, `--dry-run`.
+    /// How to write it: `<name>`, `--limit <integer>`, `--dry-run`, `[--<property> <value>]...`.
     pub usage: String,
-    /// `string`, `path`, `integer`, `name` (matches `pattern`), `text` (text, `@<file>`, or `-`
-    /// for stdin), `choice`, or `boolean`.
+    /// `string`, `path`, `integer`, `text` (text, `@<file>`, or `-` for stdin), `choice`, or
+    /// `boolean`.
     #[serde(rename = "type")]
     pub value_type: String,
     pub required: bool,
@@ -325,10 +363,6 @@ pub struct ArgumentDescription {
     pub minimum: Option<u64>,
     /// The largest `integer` accepted.
     pub maximum: Option<u64>,
-    /// The regular expression a `name` matches.
-    pub pattern: Option<String>,
-    /// The most characters a `name` may have.
-    pub max_length: Option<usize>,
     pub summary: String,
 }
 
@@ -337,7 +371,8 @@ pub fn example_command_line(example: &Example) -> String {
     format!("{NAME} {}", words.join(" "))
 }
 
-fn shell_word(word: &str) -> String {
+/// `word` as a POSIX shell reads it back: unquoted when it is plain, else single-quoted.
+pub fn shell_word(word: &str) -> String {
     let plain = !word.is_empty()
         && word
             .chars()
@@ -351,6 +386,7 @@ impl ArgumentSpec {
             ArgumentKind::Positional => format!("<{}>", self.name),
             ArgumentKind::Option => format!("--{} <{}>", self.name, self.value.type_name()),
             ArgumentKind::Flag => format!("--{}", self.name),
+            ArgumentKind::Trailing => "[--<property> <value>]...".to_string(),
         }
     }
 
@@ -359,13 +395,13 @@ impl ArgumentSpec {
             ValueKind::Integer { min, max } => (Some(min), max),
             _ => (None, None),
         };
-        let name = self.value == ValueKind::Name;
         ArgumentDescription {
             name: self.name.to_string(),
             kind: match self.kind {
                 ArgumentKind::Positional => "positional",
                 ArgumentKind::Option => "option",
                 ArgumentKind::Flag => "flag",
+                ArgumentKind::Trailing => "trailing",
             }
             .to_string(),
             usage: self.usage(),
@@ -379,8 +415,6 @@ impl ArgumentSpec {
                 .map(|values| values.iter().map(|value| (*value).to_string()).collect()),
             minimum,
             maximum,
-            pattern: name.then(|| NAME_PATTERN.to_string()),
-            max_length: name.then_some(NAME_MAX_LENGTH),
             summary: self.summary.to_string(),
         }
     }
@@ -392,10 +426,11 @@ mod tests {
 
     #[test]
     fn examples_quote_words_a_shell_would_split() {
-        let example = Example { summary: "", args: &["notes", "create", "--title", "Bob's list"] };
+        let example =
+            Example { summary: "", args: &["call", "demo", "echo", "--text", "Bob's list"] };
         assert_eq!(
             example_command_line(&example),
-            format!("{NAME} notes create --title 'Bob'\\''s list'")
+            format!("{NAME} call demo echo --text 'Bob'\\''s list'")
         );
     }
 }

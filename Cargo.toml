@@ -1,5 +1,6 @@
 # The workspace: the shipped CLI in `crates/mcp`, and `xtask`, the release helper that never
-# ships. One lint policy, one dependency version per crate, one release profile.
+# ships. `crates/mcp/examples/mcp-test-server` is the MCP server the CLI's tests run against. One
+# lint policy, one dependency version per crate, one release profile.
 [workspace]
 resolver = "3"
 members = ["crates/mcp", "xtask"]

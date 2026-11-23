@@ -1,6 +1,6 @@
 ---
 name: writing-rust
-description: Use when writing, reviewing, or restructuring Rust in this repository — adding a command or an argument, changing the store schema, silencing a Clippy lint, choosing an error code, deciding what goes to stdout versus stderr, handling paths that differ on Windows, or choosing between a unit test and a test that runs the binary.
+description: Use when writing, reviewing, or restructuring Rust in this repository — adding a command or an argument, silencing a Clippy lint, choosing an error code, deciding what goes to stdout versus stderr, or choosing between a unit test and a test that runs the binary.
 ---
 
 # Writing Rust
@@ -16,8 +16,10 @@ description: Use when writing, reviewing, or restructuring Rust in this reposito
 | Parse, dispatch, report on the streams | `crates/mcp/src/app.rs`                                                             |
 | Every command's declaration            | `COMMANDS` in `crates/mcp/src/commands/<resource>.rs`, listed in `commands::GROUPS` |
 | Registry types, parser, reference      | `registry.rs`, `parser.rs`, `reference.rs`                                          |
-| Domain rules and queries               | `crates/mcp/src/notes.rs`                                                           |
-| Store location, opening, migrations    | `crates/mcp/src/store.rs`, `store/schema.rs`, `migrations/`                         |
+| Configuration files                    | `crates/mcp/src/config/`                                                            |
+| Approval                               | `crates/mcp/src/approval/`                                                          |
+| Session daemon                         | `crates/mcp/src/daemon/`                                                            |
+| Tool arguments as flags                | `crates/mcp/src/tool_flags.rs`                                                      |
 | Shipped documentation                  | `crates/mcp/docs/*.md`, listed in `docs::DOCUMENTS`                                 |
 | Rules about values                     | `#[cfg(test)] mod tests` beside the code                                            |
 | Rules about the process                | `crates/mcp/tests/cli/` (one test binary)                                           |
@@ -41,10 +43,6 @@ Never hand-write Clap definitions: the parser is generated from the registry wit
 - A closed stdout (`… | head`) is the reader's choice, not a failure; any other stdout write error is reported as `INTERNAL`.
 - No `process::exit` below `main`; `main` returns `ExitCode`.
 
-## Store changes
-
-Add a migration directory under `crates/mcp/migrations/` (`<YYYY-MM-DD-HHMMSS>_<name>/up.sql` and `down.sql`), then update `store/schema.rs` to match. The store tests apply and revert every migration and read each column back. Existing stores are upgraded only by `mcp store migrate`; reads and dry runs must never write, so open with `store::open_for_reading` and plan changes before applying them.
-
 ## Lints
 
 `[workspace.lints]` in the root `Cargo.toml`:
@@ -65,15 +63,14 @@ Silence a lint on the item, with a reason, using `#[expect]`, never `#[allow]`. 
 
 ## Cross-platform
 
-CI builds and tests on Linux, macOS and Windows.
+CI builds and tests on Linux and macOS only.
 
 - Print paths with `Path::display()`; build them with `Path::join`.
-- Compare paths in tests by canonical directory: macOS reports `/var` as `/private/var`, and Windows canonical paths carry a `\\?\` prefix.
-- In tests use `env!("CARGO_BIN_EXE_mcp")`, which already has Windows' `.exe`.
+- Compare paths in tests by canonical directory: macOS reports `/var` as `/private/var`.
 
 ## Testing
 
-Unit tests cover rules: validation, planning, ranking, paging. Process tests in `tests/cli/` cover what needs a process: JSON on stdout, nothing on stdout for failures, exit statuses, and that dry runs and reads leave the fixture byte-for-byte unchanged (`Fixture::snapshot`). Every fixture points `MCP_STORE`, `XDG_DATA_HOME` and `LOCALAPPDATA` into a temporary directory, so no test touches real data.
+Unit tests cover rules: validation, planning, ranking, paging. Process tests in `tests/cli/` cover what needs a process: JSON on stdout, nothing on stdout for failures, exit statuses, and that dry runs and reads leave the fixture byte-for-byte unchanged (`Fixture::snapshot`). Every fixture points `XDG_CONFIG_HOME`, `XDG_STATE_HOME` and `XDG_RUNTIME_DIR` into a temporary directory, so no test touches real configuration, approvals or daemons.
 
 ## Verification
 
@@ -91,9 +88,9 @@ Never substitute a weaker command for one of these, and never report a check as 
 
 - Add `.clone()`, `Arc`, `Mutex` or `Box` to make a borrow error go away instead of deciding the ownership.
 - Add `#[allow(...)]`, or widen a lint, to make a warning go away.
-- `unwrap()` or `expect()` on anything a user, the store or the file system supplied.
+- `unwrap()` or `expect()` on anything a user, a server or the file system supplied.
 - Swallow an error with `.ok()`, a default value or an ignored result.
-- Write to the store from a read or a `--dry-run` path.
+- Start a server or write state from a `--dry-run` path, except as a command's documented effect.
 - Document a flag, default or output field anywhere but the registry and the types it derives schemas from.
 - Write a test that restates the implementation, or that asserts a constant against itself.
 - Claim correctness because it compiled.
