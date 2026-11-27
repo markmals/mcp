@@ -100,6 +100,8 @@ xtask/                  release helper: per-target archives
 
 Every pull request carries a Knope change file (`workbench change-files create`) or a `Release-Note: none` trailer. On `main`, the Prepare release workflow keeps a release pull request open. That needs Settings → Actions → General → "Allow GitHub Actions to create and approve pull requests". Merging the release pull request runs the gate, then builds, smoke-tests and attests the four archives. It then runs `knope release` to tag `v<version>` and publish the GitHub release with the archives, which Mise's `github:` backend installs. GitHub creates build attestations only for public repositories.
 
+Change files choose the next version. To choose it yourself, set the repository variable `RELEASE_VERSION` (`gh variable set RELEASE_VERSION --body 1.0.0`). The release pull request uses that version while it is above the version on `main`, and the variable stops applying once a release reaches it. It is set to `0.1.0`: 0.0.1 was published early, and the next release is 0.1.0.
+
 Homebrew builds `mcp` from source in [`markmals/homebrew-tap`](https://github.com/markmals/homebrew-tap) and serves bottles. After a release, open a pull request in the tap named `mcp-<version>` that moves `Formula/mcp.rb` to the new tag: its `tag` and the `revision` that tag points at (`git rev-parse 'v<version>^{commit}'`). The tap's `brew test-bot` workflow builds and tests bottles on that pull request. Once it passes, label the pull request `pr-pull`, and the tap's publish workflow uploads the bottles and lands the formula.
 
 Credentials: publishing the GitHub release uses the workflow's built-in `GITHUB_TOKEN`; no stored secret is needed.
