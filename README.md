@@ -20,6 +20,10 @@ brew install markmals/tap/mcp
 
 Release archives for macOS (Apple silicon and Intel) and Linux (arm64 and x64, static musl builds) are attached to every [GitHub release](https://github.com/markmals/mcp/releases), each with a build attestation: `gh attestation verify <archive> --repo markmals/mcp`. Windows is not supported: the session daemon uses Unix domain sockets.
 
+### Other programs named `mcp`
+
+Two other projects install an executable named `mcp`: the [MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk) through its `cli` extra (`mcp[cli]`), which an activated Python virtual environment can put on `PATH`, and [MCP Tools](https://github.com/f/mcptools) (`brew install f/mcptools/mcp`). When more than one is installed, the shell runs whichever comes first on `PATH`; `type -a mcp` lists them in that order. Homebrew links only one formula's `bin/mcp` at a time, so `markmals/tap/mcp` and `f/mcptools/mcp` cannot both be linked.
+
 ## Use
 
 ```sh
