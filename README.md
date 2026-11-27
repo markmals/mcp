@@ -103,3 +103,7 @@ Every pull request carries a Knope change file (`workbench change-files create`)
 Homebrew builds `mcp` from source in [`markmals/homebrew-tap`](https://github.com/markmals/homebrew-tap) and serves bottles. After a release, open a pull request in the tap named `mcp-<version>` that moves `Formula/mcp.rb` to the new tag: its `tag` and the `revision` that tag points at (`git rev-parse 'v<version>^{commit}'`). The tap's `brew test-bot` workflow builds and tests bottles on that pull request. Once it passes, label the pull request `pr-pull`, and the tap's publish workflow uploads the bottles and lands the formula.
 
 Credentials: publishing the GitHub release uses the workflow's built-in `GITHUB_TOKEN`; no stored secret is needed.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
