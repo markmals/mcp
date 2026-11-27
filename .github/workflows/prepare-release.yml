@@ -38,6 +38,9 @@ jobs:
                   git config user.name "github-actions[bot]"
                   git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             # With no change files there is nothing to release, and Knope exits nonzero.
+            # The repository variable RELEASE_VERSION sets the next release's version instead of
+            # the change files, while it is above the version on main. Once a release reaches it,
+            # it stops applying.
             - name: Prepare the release pull request
               id: prepare
               run: |
@@ -45,8 +48,16 @@ jobs:
                       echo "::notice::No change files on main; nothing to release."
                       exit 0
                   fi
-                  mise exec -- knope prepare-release --verbose
+                  override=()
+                  current="$(sed -n 's/^version = "\(.*\)"$/\1/p' crates/mcp/Cargo.toml)"
+                  newest="$(printf '%s\n%s\n' "$current" "$RELEASE_VERSION" | sort -V | tail -n 1)"
+                  if [ -n "$RELEASE_VERSION" ] && [ "$newest" != "$current" ]; then
+                      echo "::notice::RELEASE_VERSION sets the next release to $RELEASE_VERSION."
+                      override=(--override-version "$RELEASE_VERSION")
+                  fi
+                  mise exec -- knope prepare-release --verbose "${override[@]}"
               env:
                   # Pull requests opened with GITHUB_TOKEN do not trigger other workflows, and
                   # the repository must allow Actions to create pull requests.
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  RELEASE_VERSION: ${{ vars.RELEASE_VERSION }}
