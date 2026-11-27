@@ -9,6 +9,7 @@ default-members = ["crates/mcp"]
 
 [workspace.package]
 edition = "2024"
+license = "MIT"
 publish = false
 repository = "https://github.com/markmals/mcp"
 rust-version = "1.100"
