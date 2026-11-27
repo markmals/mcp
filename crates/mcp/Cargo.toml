@@ -1,7 +1,7 @@
 [package]
 name = "mcp"
 # Knope owns this version (knope.toml); change it only through a release.
-version = "0.0.1"
+version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 publish.workspace = true

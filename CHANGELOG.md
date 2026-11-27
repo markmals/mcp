@@ -1,3 +1,11 @@
+## 0.1.0 (2026-11-27)
+
+### Fixes
+
+#### License mcp under the MIT License
+
+The source, the release archives, and the Homebrew formula are available under the MIT License. See `LICENSE`.
+
 ## 0.0.1 (2026-11-23)
 
 ### Features
