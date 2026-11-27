@@ -62,7 +62,7 @@ base = "main"
 template = "release: prepare $version"
 
 [workflows.steps.body]
-template = "Merging this pull request releases mcp $version: it builds the four archives, tags `v$version`, publishes the GitHub release with these notes, and updates the Homebrew formula when the tap token is configured.\n\n$changelog"
+template = "Merging this pull request releases mcp $version: it builds the four archives, tags `v$version`, and publishes the GitHub release with these notes. Afterwards, move `Formula/mcp.rb` in markmals/homebrew-tap to the new tag in a pull request there, so the tap bottles it.\n\n$changelog"
 
 # `.github/workflows/release.yml` runs this (through `mise run release`) when the release pull
 # request merges, after it has built the archives into `artifacts/`.
